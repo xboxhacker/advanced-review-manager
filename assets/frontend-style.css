@@ -1,0 +1,375 @@
+/**
+ * Advanced Review Manager - Frontend Styles
+ * File: assets/frontend-style.css
+ */
+
+/* Floating Widget */
+.arm-floating-widget {
+    position: fixed;
+    z-index: 9999;
+    background: #ffffff;
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+    padding: 20px;
+    max-width: 320px;
+    transform: translateY(150%);
+    opacity: 0;
+    transition: all 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+.arm-floating-widget.arm-widget-show {
+    transform: translateY(0);
+    opacity: 1;
+}
+
+.arm-floating-bottom-left {
+    bottom: 20px;
+    left: 20px;
+}
+
+.arm-floating-bottom-right {
+    bottom: 20px;
+    right: 20px;
+}
+
+.arm-floating-top-left {
+    top: 100px;
+    left: 20px;
+    transform: translateY(-150%);
+}
+
+.arm-floating-top-right {
+    top: 100px;
+    right: 20px;
+    transform: translateY(-150%);
+}
+
+.arm-widget-content {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.arm-widget-close {
+    position: absolute;
+    top: -10px;
+    right: -10px;
+    width: 24px;
+    height: 24px;
+    background: #ff6b6b;
+    color: #ffffff;
+    border-radius: 50%;
+    text-align: center;
+    line-height: 24px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: transform 0.2s;
+}
+
+.arm-widget-close:hover {
+    transform: scale(1.1);
+}
+
+.arm-widget-icon {
+    font-size: 32px;
+    text-align: center;
+    animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.1);
+    }
+}
+
+.arm-widget-text {
+    text-align: center;
+    line-height: 1.4;
+    font-size: 14px;
+    color: #333;
+}
+
+.arm-widget-text strong {
+    color: #667eea;
+    display: block;
+}
+
+.arm-widget-action {
+    color: #666;
+    font-size: 13px;
+}
+
+.arm-widget-stars {
+    text-align: center;
+    font-size: 18px;
+    color: #FFD700;
+}
+
+.arm-widget-time {
+    text-align: center;
+    font-size: 12px;
+    color: #999;
+}
+
+/* Review Badge */
+.arm-review-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 12px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: #ffffff;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 600;
+    margin-top: 8px;
+}
+
+.arm-badge-stars {
+    font-size: 14px;
+}
+
+.arm-badge-count {
+    font-size: 12px;
+    opacity: 0.9;
+}
+
+/* Review Carousel */
+.arm-review-carousel {
+    margin: 40px 0;
+    padding: 40px 20px;
+    background: linear-gradient(135deg, #f5f7fa 0%, #ffffff 100%);
+    border-radius: 16px;
+}
+
+.arm-review-carousel h3 {
+    text-align: center;
+    margin-bottom: 30px;
+    font-size: 28px;
+    color: #2c3e50;
+}
+
+.arm-carousel-container {
+    display: flex;
+    overflow: hidden;
+    position: relative;
+}
+
+.arm-carousel-item {
+    min-width: 100%;
+    padding: 30px;
+    background: #ffffff;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    text-align: center;
+    transition: transform 0.5s ease-in-out;
+}
+
+.arm-carousel-rating {
+    font-size: 24px;
+    color: #FFD700;
+    margin-bottom: 15px;
+}
+
+.arm-carousel-text {
+    font-size: 16px;
+    line-height: 1.6;
+    color: #555;
+    margin: 0 0 15px 0;
+}
+
+.arm-carousel-author {
+    font-size: 14px;
+    color: #667eea;
+    font-weight: 600;
+    margin: 0;
+}
+
+/* Media Upload Preview */
+.arm-media-preview {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.arm-media-preview img {
+    border-radius: 8px;
+    border: 2px solid #e8ecf1;
+}
+
+/* Review Form Enhancements */
+.comment-form-photos,
+.comment-form-videos {
+    margin-bottom: 20px;
+}
+
+.comment-form-photos label,
+.comment-form-videos label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 600;
+    color: #2c3e50;
+}
+
+.comment-form-photos input[type="file"],
+.comment-form-videos input[type="file"] {
+    width: 100%;
+    padding: 10px;
+    border: 2px dashed #e8ecf1;
+    border-radius: 8px;
+    background: #f8f9fa;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.comment-form-photos input[type="file"]:hover,
+.comment-form-videos input[type="file"]:hover {
+    border-color: #667eea;
+    background: #ffffff;
+}
+
+/* Star Rating Interactive */
+.comment-form-rating .stars {
+    display: flex;
+    gap: 5px;
+    justify-content: flex-start;
+}
+
+.comment-form-rating .stars a {
+    font-size: 24px;
+    text-decoration: none;
+    color: #ddd;
+    transition: color 0.2s, transform 0.2s;
+}
+
+.comment-form-rating .stars a:hover,
+.comment-form-rating .stars a.active {
+    color: #FFD700;
+    transform: scale(1.1);
+}
+
+/* Review Media Display */
+.arm-review-media {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 15px;
+}
+
+.arm-review-media img {
+    width: 100px;
+    height: 100px;
+    object-fit: cover;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+
+.arm-review-media img:hover {
+    transform: scale(1.05);
+}
+
+.arm-review-media video {
+    width: 200px;
+    height: 150px;
+    border-radius: 8px;
+}
+
+/* Incentive Banner */
+.arm-incentive-banner {
+    background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
+    padding: 15px 20px;
+    border-radius: 8px;
+    text-align: center;
+    margin-bottom: 20px;
+    border-left: 4px solid #ffc107;
+}
+
+.arm-incentive-banner strong {
+    color: #856404;
+    font-size: 16px;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .arm-floating-widget {
+        max-width: 280px;
+        padding: 15px;
+    }
+    
+    .arm-floating-bottom-left,
+    .arm-floating-bottom-right {
+        left: 10px;
+        right: 10px;
+        bottom: 10px;
+        max-width: calc(100% - 20px);
+    }
+    
+    .arm-review-carousel {
+        padding: 20px 10px;
+    }
+    
+    .arm-carousel-item {
+        padding: 20px;
+    }
+}
+
+/* Animations */
+@keyframes slideInUp {
+    from {
+        transform: translateY(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+/* Lightbox for images */
+.arm-lightbox {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.9);
+    z-index: 99999;
+    display: none;
+    align-items: center;
+    justify-content: center;
+}
+
+.arm-lightbox.active {
+    display: flex;
+}
+
+.arm-lightbox img {
+    max-width: 90%;
+    max-height: 90%;
+    border-radius: 8px;
+}
+
+.arm-lightbox-close {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    font-size: 32px;
+    color: #ffffff;
+    cursor: pointer;
+    z-index: 100000;
+}
