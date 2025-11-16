@@ -5,11 +5,20 @@
  */
 if (!defined('ABSPATH')) exit;
 
-$settings = get_option('arm_settings');
+// Force fresh settings retrieval
+$settings = get_option('arm_settings', array());
+
+// Debug: Show current settings
+if (isset($_GET['debug_settings'])) {
+    echo '<pre style="background: #f0f0f0; padding: 10px; margin: 20px;">';
+    echo 'Current Settings from Database:' . "\n";
+    print_r($settings);
+    echo '</pre>';
+}
 
 // Default values for email template
 $defaults = array(
-    'email_subject' => 'We\'d love your feedback on your recent order!',
+    'email_subject' => "We'd love your feedback on your recent order!",
     'email_heading' => 'How was your experience?',
     'email_message' => "Hi {customer_name},\n\nThank you for your recent purchase from {store_name}! We hope you're enjoying your new items.\n\nWe'd love to hear about your experience. Your feedback helps us improve and helps other customers make informed decisions.\n\nCould you take a moment to share your thoughts?",
     'button_text' => 'Leave a Review',
@@ -27,6 +36,16 @@ $settings = wp_parse_args($settings, $defaults);
             Email Template Editor
         </h1>
         <p class="arm-subtitle">Customize your review reminder emails with A/B testing variants</p>
+        
+        <!-- Settings Reload Notice -->
+        <?php if (isset($_GET['settings_saved'])): ?>
+            <div class="notice notice-success" style="margin: 20px 0; padding: 15px;">
+                <strong>✅ Settings saved successfully!</strong> Page reloaded with fresh data.
+                <?php if (empty($settings['email_subject'])): ?>
+                    <br><span style="color: #d63638;">⚠️ Warning: Email subject is empty in database. Please set it below.</span>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
     </div>
 
     <!-- Tab Navigation -->
@@ -34,7 +53,6 @@ $settings = wp_parse_args($settings, $defaults);
         <button class="arm-tab-btn active" data-tab="template-a">Template A (Default)</button>
         <button class="arm-tab-btn" data-tab="template-b">Template B (Variant)</button>
         <button class="arm-tab-btn" data-tab="template-c">Template C (Variant)</button>
-        <button class="arm-tab-btn" data-tab="multi-product">Multi-Product Template</button>
         <button class="arm-tab-btn" data-tab="followup">Follow-up Templates</button>
     </div>
 
@@ -352,61 +370,6 @@ $settings = wp_parse_args($settings, $defaults);
                         </div>
                     </div>
                 </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Multi-Product Template -->
-    <div class="arm-tab-content" id="multi-product">
-        <div class="arm-card">
-            <div class="arm-card-header">
-                <h2>🛍️ Multi-Product Review Template</h2>
-            </div>
-            <div class="arm-card-body">
-                <p class="arm-field-description">This template is used when requesting reviews for multiple products in a single email.</p>
-                
-                <form id="arm-multi-product-form" class="arm-form">
-                    <?php wp_nonce_field('arm_nonce', 'arm_nonce_field'); ?>
-                    
-                    <div class="arm-form-group">
-                        <label for="multi_email_subject">Email Subject</label>
-                        <input type="text" id="multi_email_subject" name="multi_email_subject" value="<?php echo esc_attr(isset($settings['multi_email_subject']) ? $settings['multi_email_subject'] : 'How did we do? Review your items'); ?>" class="arm-input-wide">
-                    </div>
-
-                    <div class="arm-form-group">
-                        <label for="multi_email_intro">Introduction Message</label>
-                        <?php
-                        wp_editor(
-                            isset($settings['multi_email_intro']) ? $settings['multi_email_intro'] : 'Hi {customer_name},\n\nThank you for your order! We\'d love to hear your thoughts on each of your items:',
-                            'multi_email_intro',
-                            array(
-                                'textarea_name' => 'multi_email_intro',
-                                'textarea_rows' => 6,
-                                'media_buttons' => true,
-                                'teeny' => false,
-                                'tinymce' => array(
-                                    'toolbar1' => 'formatselect,bold,italic,underline,bullist,numlist,blockquote,alignleft,aligncenter,alignright,link,forecolor,backcolor',
-                                    'toolbar2' => 'undo,redo,removeformat,code'
-                                ),
-                                'quicktags' => true
-                            )
-                        );
-                        ?>
-                        <p class="arm-field-description">Available variables: {customer_name}, {order_id}, {store_name}</p>
-                    </div>
-
-                    <div class="arm-form-group">
-                        <label for="multi_product_prompt">Per-Product Prompt</label>
-                        <input type="text" id="multi_product_prompt" name="multi_product_prompt" value="<?php echo esc_attr(isset($settings['multi_product_prompt']) ? $settings['multi_product_prompt'] : 'How would you rate this product?'); ?>" class="arm-input-wide">
-                    </div>
-
-                    <div class="arm-form-actions">
-                        <button type="submit" class="arm-btn arm-btn-primary">
-                            <span class="arm-btn-icon">💾</span>
-                            Save Multi-Product Template
-                        </button>
-                    </div>
-                </form>
             </div>
         </div>
     </div>

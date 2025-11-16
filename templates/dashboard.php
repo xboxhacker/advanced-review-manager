@@ -13,6 +13,90 @@ if (!defined('ABSPATH')) exit;
             Review Manager Dashboard
         </h1>
         <p class="arm-subtitle">Comprehensive overview of your review management system</p>
+        
+        <!-- Show Last Email Error if exists -->
+        <?php
+        $last_error = get_option('arm_last_email_error', array());
+        if (!empty($last_error)): ?>
+            <div class="notice notice-warning" style="margin: 20px 0; padding: 15px;">
+                <h3 style="margin-top: 0;">⚠️ Last Email Error Details</h3>
+                <table style="width: 100%; font-size: 12px; font-family: monospace;">
+                    <?php foreach ($last_error as $key => $value): ?>
+                        <tr>
+                            <td style="padding: 4px; font-weight: bold; width: 200px;"><?php echo esc_html($key); ?>:</td>
+                            <td style="padding: 4px;"><?php echo esc_html(is_array($value) ? json_encode($value) : $value); ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                </table>
+                <p style="margin-top: 10px;">
+                    <button type="button" class="button" onclick="jQuery.post(ajaxurl, {action: 'arm_clear_last_error', nonce: '<?php echo wp_create_nonce('arm_nonce'); ?>'}, function() { location.reload(); });">
+                        Clear Error
+                    </button>
+                </p>
+            </div>
+        <?php endif; ?>
+        
+        <!-- Database Tables Check -->
+        <?php
+        global $wpdb;
+        $tables_missing = false;
+        $missing_tables = array();
+        $tables_to_check = array('arm_reminders', 'arm_email_tracking', 'arm_analytics', 'arm_product_blacklist', 'arm_review_media');
+        foreach ($tables_to_check as $table) {
+            $table_name = $wpdb->prefix . $table;
+            if (!$wpdb->get_var("SHOW TABLES LIKE '{$table_name}'")) {
+                $tables_missing = true;
+                $missing_tables[] = $table;
+            }
+        }
+        if ($tables_missing): ?>
+            <div class="notice notice-error" style="margin: 20px 0; padding: 15px;">
+                <h3 style="margin-top: 0;">⚠️ Database Tables Missing</h3>
+                <p>Some required database tables are missing: <code><?php echo implode(', ', $missing_tables); ?></code></p>
+                <p>
+                    <button type="button" class="button button-primary" id="arm-create-tables-btn">
+                        Create Database Tables Now
+                    </button>
+                    <span id="arm-create-tables-loading" style="display:none; margin-left:10px;">Creating tables...</span>
+                </p>
+                <p style="font-size: 12px; color: #666;">
+                    Or manually run the SQL file: <code>create-database-tables.sql</code> in your phpMyAdmin
+                </p>
+            </div>
+            <script>
+            jQuery(document).ready(function($) {
+                $('#arm-create-tables-btn').on('click', function() {
+                    var $btn = $(this);
+                    $btn.prop('disabled', true);
+                    $('#arm-create-tables-loading').show();
+                    
+                    $.ajax({
+                        url: ajaxurl,
+                        type: 'POST',
+                        data: {
+                            action: 'arm_create_tables',
+                            nonce: '<?php echo wp_create_nonce('arm_nonce'); ?>'
+                        },
+                        success: function(response) {
+                            if (response.success) {
+                                alert('✅ ' + response.data.message);
+                                location.reload();
+                            } else {
+                                alert('❌ ' + response.data.message);
+                                $btn.prop('disabled', false);
+                                $('#arm-create-tables-loading').hide();
+                            }
+                        },
+                        error: function() {
+                            alert('AJAX error creating tables');
+                            $btn.prop('disabled', false);
+                            $('#arm-create-tables-loading').hide();
+                        }
+                    });
+                });
+            });
+            </script>
+        <?php endif; ?>
     </div>
 
     <div class="arm-stats-grid">
@@ -141,7 +225,7 @@ if (!defined('ABSPATH')) exit;
                     </tbody>
                 </table>
                 <div style="margin-top: 15px; padding: 12px; background: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 4px;">
-                    <strong>ℹ️ Note:</strong> These orders are older than your reminder threshold (<?php echo $reminder_days; ?> days). Click "Schedule Now" to manually schedule reminders for them.
+                    <strong>ℹ️ Note:</strong> These orders are older than your reminder threshold (<?php echo $reminder_days; ?> days). Click "Schedule Now" to add them to the reminder queue.
                 </div>
             </div>
         </div>

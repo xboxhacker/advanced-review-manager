@@ -217,16 +217,27 @@
                 data: $.param(formData),
                 success: function(response) {
                     if (response.success) {
-                        showNotification('Email template saved successfully!', 'success');
+                        showNotification('Email template saved successfully! Reloading...', 'success');
+                        
+                        // Check if server wants us to redirect
+                        if (response.data && response.data.redirect_url) {
+                            setTimeout(function() {
+                                window.location.href = response.data.redirect_url;
+                            }, 500);
+                        } else {
+                            // Fallback: just reload the page
+                            setTimeout(function() {
+                                window.location.reload(true);
+                            }, 500);
+                        }
                     } else {
                         showNotification(response.data || 'Failed to save template', 'error');
+                        $button.html(originalText).prop('disabled', false);
                     }
                 },
                 error: function(xhr, status, error) {
                     console.error('ARM: AJAX error:', xhr.responseText);
                     showNotification('Error saving template: ' + error, 'error');
-                },
-                complete: function() {
                     $button.html(originalText).prop('disabled', false);
                 }
             });
@@ -535,12 +546,21 @@
                         $link.replaceWith('<span style="color: #46b450; font-weight: 600;">✓ Sent</span>');
                         showNotification('Reminder sent successfully!', 'success');
                     } else {
-                        showNotification(response.data || 'Failed to send reminder', 'error');
+                        var errorMsg = response.data || 'Failed to send reminder';
+                        showNotification(errorMsg, 'error');
+                        console.error('ARM Send Error:', response);
+                        alert('Email Error:\n\n' + errorMsg + '\n\nCheck the dashboard for full error details.');
                         $link.text(originalText).css('pointer-events', 'auto');
                     }
                 },
-                error: function() {
-                    showNotification('Error sending reminder', 'error');
+                error: function(xhr, status, error) {
+                    var errorMsg = 'AJAX Error: ' + error;
+                    if (xhr.responseText) {
+                        console.error('Server Response:', xhr.responseText);
+                        errorMsg += '\n\nServer said: ' + xhr.responseText.substring(0, 200);
+                    }
+                    showNotification(errorMsg, 'error');
+                    alert('Email Send Failed:\n\n' + errorMsg + '\n\nCheck browser console for details.');
                     $link.text(originalText).css('pointer-events', 'auto');
                 }
             });
@@ -603,17 +623,35 @@
                 },
                 success: function(response) {
                     if (response.success) {
-                        showNotification('Reminder scheduled successfully!', 'success');
-                        $button.closest('tr').fadeOut(400, function() {
-                            $(this).remove();
-                        });
+                        var message = 'Reminder scheduled successfully!';
+                        
+                        // Show scheduled date if provided
+                        if (response.data && response.data.scheduled_date) {
+                            message += '\n\nScheduled to send on: ' + response.data.scheduled_date;
+                            message += '\n(in ' + response.data.reminder_days + ' days)';
+                        }
+                        
+                        showNotification(message, 'success');
+                        alert(message);
+                        
+                        // Reload to update status
+                        setTimeout(function() {
+                            location.reload();
+                        }, 1500);
                     } else {
-                        showNotification(response.data || 'Failed to schedule reminder', 'error');
+                        var errorMsg = response.data || 'Failed to schedule reminder';
+                        alert('Error: ' + errorMsg);
+                        showNotification(errorMsg, 'error');
                         $button.text(originalText).prop('disabled', false);
                     }
                 },
-                error: function() {
-                    showNotification('Error scheduling reminder', 'error');
+                error: function(xhr, status, error) {
+                    var errorMsg = 'Error scheduling reminder: ' + error;
+                    if (xhr.responseText) {
+                        errorMsg += '\n\nServer response: ' + xhr.responseText;
+                    }
+                    alert(errorMsg);
+                    showNotification(errorMsg, 'error');
                     $button.text(originalText).prop('disabled', false);
                 }
             });

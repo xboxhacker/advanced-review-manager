@@ -43,11 +43,105 @@ $settings = get_option('arm_settings');
                     </div>
                     <p class="arm-field-description">Number of days to wait before sending the first review reminder</p>
                 </div>
+
+                <div class="arm-form-group">
+                    <label for="from_email">From Email Address</label>
+                    <input type="email" id="from_email" name="from_email" value="<?php echo esc_attr(isset($settings['from_email']) ? $settings['from_email'] : get_option('admin_email')); ?>" class="arm-input-wide" required>
+                    <p class="arm-field-description">The email address review reminders will be sent from. Use a professional email address to avoid spam filters.</p>
+                </div>
+
+                <div class="arm-form-group">
+                    <label for="from_name">From Name</label>
+                    <input type="text" id="from_name" name="from_name" value="<?php echo esc_attr(isset($settings['from_name']) ? $settings['from_name'] : get_bloginfo('name')); ?>" class="arm-input-wide" required>
+                    <p class="arm-field-description">The name that will appear as the sender of review reminder emails.</p>
+                </div>
+
+                <div class="arm-form-group">
+                    <label class="arm-toggle-label">
+                        <input type="checkbox" name="enable_qr_code" <?php checked(isset($settings['enable_qr_code']) && $settings['enable_qr_code'], true); ?>>
+                        <span class="arm-toggle-slider"></span>
+                        <span class="arm-toggle-text">Include QR Code in Emails</span>
+                    </label>
+                    <p class="arm-field-description">Add a scannable QR code that links directly to the review page for mobile convenience.</p>
+                </div>
+
+                <div class="arm-form-group">
+                    <label class="arm-toggle-label">
+                        <input type="checkbox" name="use_custom_review_page" <?php checked(isset($settings['use_custom_review_page']) && $settings['use_custom_review_page'], true); ?>>
+                        <span class="arm-toggle-slider"></span>
+                        <span class="arm-toggle-text">Use Custom Review Landing Page</span>
+                    </label>
+                    <p class="arm-field-description">Enable the custom WordPress page for review submissions. If disabled, customers will be directed to product pages. <strong>Recommended: Keep this enabled to avoid 404 errors.</strong></p>
+                    
+                    <?php 
+                    // Debug: Show what page will be used
+                    $page_id = get_option('arm_review_page_id');
+                    if ($page_id && get_post($page_id)) {
+                        $page_url = get_permalink($page_id);
+                        echo '<div style="margin-top:10px; padding:10px; background:#e7f5e8; border-left:3px solid #4caf50;">';
+                        echo '<strong>✅ Custom page found:</strong><br>';
+                        echo 'Page ID: ' . $page_id . '<br>';
+                        echo 'URL: <code>' . esc_html($page_url) . '</code>';
+                        echo '</div>';
+                    } else {
+                        $found_by_slug = get_page_by_path('submit-review');
+                        if ($found_by_slug) {
+                            echo '<div style="margin-top:10px; padding:10px; background:#fff3cd; border-left:3px solid #ffc107;">';
+                            echo '<strong>⚠️ Page exists but not linked:</strong><br>';
+                            echo 'Page ID: ' . $found_by_slug->ID . '<br>';
+                            echo 'URL: <code>' . esc_html(get_permalink($found_by_slug->ID)) . '</code><br>';
+                            echo '<small>Page found by slug but arm_review_page_id option not set. Try sending a test email to auto-link it.</small>';
+                            echo '</div>';
+                        } else {
+                            echo '<div style="margin-top:10px; padding:10px; background:#fee; border-left:3px solid #f44336;">';
+                            echo '<strong>❌ Custom page not found!</strong><br>';
+                            echo 'Please create a page with slug "submit-review" containing the shortcode: <code>[arm_review_submission]</code><br>';
+                            echo '<small>See review-page-for-wordpress.php for instructions.</small>';
+                            echo '</div>';
+                        }
+                    }
+                    ?>
+                </div>
+            </div>
+        </div>
+
+        <!-- Media Upload Settings -->
+        <div class="arm-card">
+            <div class="arm-card-header">
+                <h2>📷 Photo Reviews (Optimized)</h2>
+            </div>
+            <div class="arm-card-body">
+                <div class="arm-form-group">
+                    <label class="arm-toggle-label">
+                        <input type="checkbox" name="enable_photo_reviews" <?php checked(isset($settings['enable_photo_reviews']) && $settings['enable_photo_reviews'], true); ?>>
+                        <span class="arm-toggle-slider"></span>
+                        <span class="arm-toggle-text">Enable Photo Uploads</span>
+                    </label>
+                    <p class="arm-field-description">Allow customers to upload photos with their reviews. Optimized for performance with smart limits.</p>
+                </div>
+
+                <div class="arm-form-group">
+                    <label for="max_media_files">Maximum Photos Per Review</label>
+                    <div class="arm-input-group">
+                        <input type="number" id="max_media_files" name="max_media_files" value="<?php echo esc_attr(isset($settings['max_media_files']) ? $settings['max_media_files'] : 3); ?>" min="1" max="5">
+                        <span class="arm-input-suffix">photos</span>
+                    </div>
+                    <p class="arm-field-description">Maximum 5 photos recommended to prevent server overload</p>
+                </div>
+
+                <div class="arm-form-group">
+                    <label for="max_file_size">Maximum File Size</label>
+                    <div class="arm-input-group">
+                        <input type="number" id="max_file_size" name="max_file_size" value="<?php echo esc_attr(isset($settings['max_file_size']) ? $settings['max_file_size'] : 5); ?>" min="1" max="10">
+                        <span class="arm-input-suffix">MB</span>
+                    </div>
+                    <p class="arm-field-description">Maximum 10MB recommended. Smaller = faster uploads. Accepts: JPG or PNG only</p>
+                </div>
             </div>
         </div>
 
         <!-- SMS Settings -->
-        <div class="arm-card">
+        <div class="arm-card" style="display:none;">
             <div class="arm-card-header">
                 <h2>📱 SMS Integration</h2>
             </div>
@@ -78,7 +172,7 @@ $settings = get_option('arm_settings');
 
                 <div class="arm-form-group">
                     <label for="sms_message">SMS Message Template</label>
-                    <textarea id="sms_message" name="sms_message" rows="3" class="arm-input-wide"><?php echo esc_textarea(isset($settings['sms_message']) ? $settings['sms_message'] : 'Hi {customer_name}! Thanks for your order. We\'d love your feedback: {review_url}'); ?></textarea>
+                    <textarea id="sms_message" name="sms_message" rows="3" class="arm-input-wide"><?php echo esc_textarea(isset($settings['sms_message']) ? $settings['sms_message'] : "Hi {customer_name}! Thanks for your order. We'd love your feedback: {review_url}"); ?></textarea>
                     <p class="arm-field-description">Available variables: {customer_name}, {review_url}, {store_name}</p>
                 </div>
             </div>
@@ -103,40 +197,6 @@ $settings = get_option('arm_settings');
                     <label for="max_products_per_email">Maximum Products Per Email</label>
                     <input type="number" id="max_products_per_email" name="max_products_per_email" value="<?php echo esc_attr(isset($settings['max_products_per_email']) ? $settings['max_products_per_email'] : 5); ?>" min="1" max="20">
                     <p class="arm-field-description">For orders with many items, limit products shown in email</p>
-                </div>
-            </div>
-        </div>
-
-        <!-- Photo/Video Reviews -->
-        <div class="arm-card">
-            <div class="arm-card-header">
-                <h2>📸 Photo & Video Reviews</h2>
-            </div>
-            <div class="arm-card-body">
-                <div class="arm-form-group">
-                    <label class="arm-toggle-label">
-                        <input type="checkbox" name="enable_photo_reviews" <?php checked(isset($settings['enable_photo_reviews']) && $settings['enable_photo_reviews'], true); ?>>
-                        <span class="arm-toggle-slider"></span>
-                        <span class="arm-toggle-text">Enable Photo Uploads</span>
-                    </label>
-                </div>
-
-                <div class="arm-form-group">
-                    <label class="arm-toggle-label">
-                        <input type="checkbox" name="enable_video_reviews" <?php checked(isset($settings['enable_video_reviews']) && $settings['enable_video_reviews'], true); ?>>
-                        <span class="arm-toggle-slider"></span>
-                        <span class="arm-toggle-text">Enable Video Uploads</span>
-                    </label>
-                </div>
-
-                <div class="arm-form-group">
-                    <label for="max_media_files">Maximum Media Files Per Review</label>
-                    <input type="number" id="max_media_files" name="max_media_files" value="<?php echo esc_attr(isset($settings['max_media_files']) ? $settings['max_media_files'] : 5); ?>" min="1" max="10">
-                </div>
-
-                <div class="arm-form-group">
-                    <label for="max_file_size">Maximum File Size (MB)</label>
-                    <input type="number" id="max_file_size" name="max_file_size" value="<?php echo esc_attr(isset($settings['max_file_size']) ? $settings['max_file_size'] : 10); ?>" min="1" max="50">
                 </div>
             </div>
         </div>

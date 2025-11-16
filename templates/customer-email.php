@@ -8,9 +8,12 @@ if (!defined('ABSPATH')) exit;
 
 // Get settings
 $settings = get_option('arm_settings');
-$email_subject = $settings['email_subject'] ?? 'We\'d love your feedback!';
+$email_subject = $settings['email_subject'] ?? "We'd love your feedback!";
 $email_heading = $settings['email_heading'] ?? 'How was your recent purchase?';
-$email_message = $settings['email_message'] ?? 'Hi {customer_name},\n\nThank you for your recent order! We hope you\'re loving your purchase.\n\nWould you mind taking a moment to share your experience? Your feedback helps us improve and helps other customers make informed decisions.';
+// $email_message is now pre-processed from the calling function with replacements applied
+if (!isset($email_message)) {
+    $email_message = $settings['email_message'] ?? 'Hi {customer_name},\n\nThank you for your recent order! We hope you\'re loving your purchase.\n\nWould you mind taking a moment to share your experience? Your feedback helps us improve and helps other customers make informed decisions.';
+}
 $button_text = $settings['button_text'] ?? 'Write a Review';
 $button_color = $settings['button_color'] ?? '#ff6b6b';
 

@@ -3,7 +3,7 @@
  * Plugin Name: Advanced Review Manager Pro
  * Plugin URI: 
  * Description: Ultimate WooCommerce review management system with multi-product reviews, photo/video uploads, SMS integration, A/B testing, social proof widgets, incentives, advanced analytics, and automated follow-ups
- * Version: 2.0.0
+ * Version: 2.2.3
  * Author: Xboxhacker
  * Author URI: 
  * Text Domain: advanced-review-manager
@@ -20,7 +20,7 @@ if (!defined('ABSPATH')) {
 }
 
 // Define plugin constants
-define('ARM_VERSION', '2.0.0');
+define('ARM_VERSION', '2.2.2');
 define('ARM_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('ARM_PLUGIN_URL', plugin_dir_url(__FILE__));
 
@@ -56,6 +56,8 @@ class Advanced_Review_Manager {
         // Admin menu
         add_action('admin_menu', array($this, 'add_admin_menu'));
         add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_assets'));
+        add_action('admin_notices', array($this, 'show_permalink_flush_notice'));
+        add_action('admin_post_arm_flush_permalinks', array($this, 'handle_flush_permalinks'));
         
         // WooCommerce hooks
         add_action('woocommerce_order_status_completed', array($this, 'schedule_review_reminder'), 10, 1);
@@ -63,32 +65,31 @@ class Advanced_Review_Manager {
         add_action('manage_shop_order_posts_custom_column', array($this, 'render_review_reminder_column'), 10, 2);
         
         // AJAX handlers
+        // Essential AJAX handlers only (optimized to reduce admin-ajax.php load)
         add_action('wp_ajax_arm_save_settings', array($this, 'ajax_save_settings'));
         add_action('wp_ajax_arm_send_test_email', array($this, 'ajax_send_test_email'));
-        add_action('wp_ajax_arm_generate_fake_review', array($this, 'ajax_generate_fake_review'));
         add_action('wp_ajax_arm_send_instant_reminder', array($this, 'ajax_send_instant_reminder'));
         add_action('wp_ajax_arm_schedule_reminder', array($this, 'ajax_schedule_reminder'));
-        add_action('wp_ajax_arm_get_analytics', array($this, 'ajax_get_analytics'));
         add_action('wp_ajax_arm_save_email_template', array($this, 'ajax_save_email_template'));
         add_action('wp_ajax_arm_reset_email_template', array($this, 'ajax_reset_email_template'));
-        add_action('wp_ajax_arm_save_multi_product_template', array($this, 'ajax_save_multi_product_template'));
-        add_action('wp_ajax_arm_save_followup_templates', array($this, 'ajax_save_followup_templates'));
-        add_action('wp_ajax_arm_generate_bulk_reviews', array($this, 'ajax_generate_bulk_reviews'));
-        add_action('wp_ajax_arm_save_review_templates', array($this, 'ajax_save_review_templates'));
-        add_action('wp_ajax_arm_get_advanced_analytics', array($this, 'ajax_get_advanced_analytics'));
-        add_action('wp_ajax_arm_get_ab_test_results', array($this, 'ajax_get_ab_test_results'));
-        add_action('wp_ajax_arm_get_generated_stats', array($this, 'ajax_get_generated_stats'));
-        add_action('wp_ajax_arm_export_analytics', array($this, 'ajax_export_analytics'));
-        add_action('wp_ajax_arm_track_email_open', array($this, 'ajax_track_email_open'));
-        add_action('wp_ajax_arm_track_email_click', array($this, 'ajax_track_email_click'));
-        add_action('wp_ajax_nopriv_arm_track_email_open', array($this, 'ajax_track_email_open'));
-        add_action('wp_ajax_nopriv_arm_track_email_click', array($this, 'ajax_track_email_click'));
         add_action('wp_ajax_arm_bulk_send_reminders', array($this, 'ajax_bulk_send_reminders'));
         add_action('wp_ajax_arm_add_to_blacklist', array($this, 'ajax_add_to_blacklist'));
         add_action('wp_ajax_arm_remove_from_blacklist', array($this, 'ajax_remove_from_blacklist'));
-        add_action('wp_ajax_arm_sync_google_reviews', array($this, 'ajax_sync_google_reviews'));
-        add_action('wp_ajax_arm_import_google_review', array($this, 'ajax_import_google_review'));
+        add_action('wp_ajax_arm_create_tables', array($this, 'ajax_create_tables'));
+        add_action('wp_ajax_arm_get_ab_test_results', array($this, 'ajax_get_ab_test_results'));
+        
+        // Review submission with media upload
+        add_action('wp_ajax_arm_submit_inline_review', array($this, 'ajax_submit_inline_review'));
+        add_action('wp_ajax_nopriv_arm_submit_inline_review', array($this, 'ajax_submit_inline_review'));
+        add_action('wp_ajax_arm_upload_review_media', array($this, 'ajax_upload_review_media'));
+        add_action('wp_ajax_nopriv_arm_upload_review_media', array($this, 'ajax_upload_review_media'));
         add_action('wp_ajax_arm_get_optimal_send_time', array($this, 'ajax_get_optimal_send_time'));
+        
+        // TEMPORARY DEBUG - REMOVE BEFORE PRODUCTION
+        add_action('wp_ajax_arm_debug_force_send_email', array($this, 'ajax_debug_force_send_email'));
+        add_action('wp_ajax_arm_nuclear_reset', array($this, 'ajax_nuclear_reset'));
+        add_action('wp_ajax_arm_clear_last_error', array($this, 'ajax_clear_last_error'));
+        add_action('wp_ajax_arm_bulk_mark_as_sent', array($this, 'ajax_bulk_mark_as_sent'));
         
         // Frontend actions
         add_action('wp_enqueue_scripts', array($this, 'enqueue_frontend_assets'));
@@ -100,12 +101,21 @@ class Advanced_Review_Manager {
         add_action('comment_post', array($this, 'handle_review_gating'), 10, 2);
         add_action('comment_post', array($this, 'track_review_submission'), 10, 2);
         
+        // Prevent duplicate reviews - hide review form if already reviewed
+        add_filter('woocommerce_product_review_comment_form_args', array($this, 'prevent_duplicate_reviews'), 99);
+        
+        // Display review media (photos) in reviews
+        add_action('woocommerce_review_after_comment_text', array($this, 'display_review_media_action'));
+        
         // WooCommerce product page enhancements
         add_action('woocommerce_after_shop_loop_item', array($this, 'display_review_badge'), 15);
         add_action('woocommerce_after_single_product_summary', array($this, 'display_review_carousel'), 15);
         
         // Email tracking
         add_action('init', array($this, 'handle_email_tracking'));
+        
+        // Review submission page shortcode
+        add_shortcode('arm_review_submission', array($this, 'render_review_submission_page'));
         
         // Cron hook
         add_action('arm_send_review_reminder', array($this, 'send_review_reminder'), 10, 1);
@@ -125,6 +135,28 @@ class Advanced_Review_Manager {
         if (version_compare($db_version, '2.0.0', '<')) {
             $this->migrate_to_2_0_0();
             update_option('arm_db_version', '2.0.0');
+        }
+        
+        // Migration for version 2.1.8 - Add file_type column if missing
+        if (version_compare($db_version, '2.1.8', '<')) {
+            $this->migrate_to_2_1_8();
+            update_option('arm_db_version', '2.1.8');
+        }
+    }
+    
+    private function migrate_to_2_1_8() {
+        global $wpdb;
+        $media_table = $wpdb->prefix . 'arm_review_media';
+        
+        // Check if table exists
+        if ($wpdb->get_var("SHOW TABLES LIKE '{$media_table}'") === $media_table) {
+            // Check if file_type column exists
+            $column_exists = $wpdb->get_results("SHOW COLUMNS FROM {$media_table} LIKE 'file_type'");
+            if (empty($column_exists)) {
+                // Add file_type column
+                $wpdb->query("ALTER TABLE {$media_table} ADD COLUMN file_type varchar(20) DEFAULT 'image' AFTER file_url");
+                error_log('ARM Migration 2.1.8: Added file_type column to arm_review_media table');
+            }
         }
     }
     
@@ -237,59 +269,7 @@ Thank you for your time!
         ) $charset_collate;";
         dbDelta($sql);
         
-        // Table for A/B testing tracking
-        $ab_table = $wpdb->prefix . 'arm_ab_tests';
-        $sql = "CREATE TABLE IF NOT EXISTS $ab_table (
-            id bigint(20) NOT NULL AUTO_INCREMENT,
-            reminder_id bigint(20) NOT NULL,
-            variant varchar(10) NOT NULL,
-            sent_date datetime DEFAULT NULL,
-            opened tinyint(1) DEFAULT 0,
-            opened_date datetime DEFAULT NULL,
-            clicked tinyint(1) DEFAULT 0,
-            clicked_date datetime DEFAULT NULL,
-            converted tinyint(1) DEFAULT 0,
-            converted_date datetime DEFAULT NULL,
-            PRIMARY KEY (id),
-            KEY reminder_id (reminder_id),
-            KEY variant (variant)
-        ) $charset_collate;";
-        dbDelta($sql);
-        
         // Table for review media (photos/videos)
-        $media_table = $wpdb->prefix . 'arm_review_media';
-        $sql = "CREATE TABLE IF NOT EXISTS $media_table (
-            id bigint(20) NOT NULL AUTO_INCREMENT,
-            comment_id bigint(20) NOT NULL,
-            attachment_id bigint(20) NOT NULL,
-            media_type varchar(20) DEFAULT 'image',
-            file_url text,
-            created_at datetime DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (id),
-            KEY comment_id (comment_id)
-        ) $charset_collate;";
-        dbDelta($sql);
-        
-        // Table for incentives/rewards
-        $incentives_table = $wpdb->prefix . 'arm_incentives';
-        $sql = "CREATE TABLE IF NOT EXISTS $incentives_table (
-            id bigint(20) NOT NULL AUTO_INCREMENT,
-            comment_id bigint(20) NOT NULL,
-            order_id bigint(20) NOT NULL,
-            customer_email varchar(100) NOT NULL,
-            incentive_type varchar(50) DEFAULT 'coupon',
-            coupon_code varchar(100),
-            points_awarded int DEFAULT 0,
-            claimed tinyint(1) DEFAULT 0,
-            claimed_date datetime DEFAULT NULL,
-            created_at datetime DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (id),
-            KEY comment_id (comment_id),
-            KEY order_id (order_id)
-        ) $charset_collate;";
-        dbDelta($sql);
-        
-        // Table for email tracking
         $tracking_table = $wpdb->prefix . 'arm_email_tracking';
         $sql = "CREATE TABLE IF NOT EXISTS $tracking_table (
             id bigint(20) NOT NULL AUTO_INCREMENT,
@@ -310,35 +290,25 @@ Thank you for your time!
         ) $charset_collate;";
         dbDelta($sql);
         
-        // Table for SMS tracking
-        $sms_table = $wpdb->prefix . 'arm_sms_log';
-        $sql = "CREATE TABLE IF NOT EXISTS $sms_table (
+        // Table for analytics (simplified tracking)
+        $analytics_table = $wpdb->prefix . 'arm_analytics';
+        $sql = "CREATE TABLE IF NOT EXISTS $analytics_table (
             id bigint(20) NOT NULL AUTO_INCREMENT,
+            reminder_id bigint(20) NOT NULL,
             order_id bigint(20) NOT NULL,
-            phone_number varchar(20) NOT NULL,
-            message text,
-            status varchar(20) DEFAULT 'sent',
-            twilio_sid varchar(100),
-            sent_date datetime DEFAULT CURRENT_TIMESTAMP,
-            error_message text,
+            customer_email varchar(100) NOT NULL,
+            email_sent tinyint(1) DEFAULT 0,
+            email_opened tinyint(1) DEFAULT 0,
+            email_clicked tinyint(1) DEFAULT 0,
+            review_submitted tinyint(1) DEFAULT 0,
+            sent_date datetime DEFAULT NULL,
+            opened_date datetime DEFAULT NULL,
+            clicked_date datetime DEFAULT NULL,
+            submitted_date datetime DEFAULT NULL,
+            created_at datetime DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (id),
+            KEY reminder_id (reminder_id),
             KEY order_id (order_id)
-        ) $charset_collate;";
-        dbDelta($sql);
-        
-        // Table for review moderation queue
-        $moderation_table = $wpdb->prefix . 'arm_moderation';
-        $sql = "CREATE TABLE IF NOT EXISTS $moderation_table (
-            id bigint(20) NOT NULL AUTO_INCREMENT,
-            comment_id bigint(20) NOT NULL,
-            flagged_reason varchar(100),
-            flagged_date datetime DEFAULT CURRENT_TIMESTAMP,
-            reviewed tinyint(1) DEFAULT 0,
-            reviewed_by bigint(20),
-            reviewed_date datetime DEFAULT NULL,
-            action_taken varchar(50),
-            PRIMARY KEY (id),
-            KEY comment_id (comment_id)
         ) $charset_collate;";
         dbDelta($sql);
         
@@ -355,59 +325,37 @@ Thank you for your time!
         ) $charset_collate;";
         dbDelta($sql);
         
-        // Table for Google Reviews sync
-        $google_reviews_table = $wpdb->prefix . 'arm_google_reviews';
-        $sql = "CREATE TABLE IF NOT EXISTS $google_reviews_table (
+        // Table for review media (photos/videos) - optimized and backward compatible
+        $media_table = $wpdb->prefix . 'arm_review_media';
+        $sql = "CREATE TABLE IF NOT EXISTS $media_table (
             id bigint(20) NOT NULL AUTO_INCREMENT,
-            google_review_id varchar(255) NOT NULL,
-            product_id bigint(20) DEFAULT NULL,
-            author_name varchar(255),
-            author_photo varchar(500),
-            rating int NOT NULL,
-            review_text text,
-            review_date datetime,
-            imported_date datetime DEFAULT CURRENT_TIMESTAMP,
-            synced tinyint(1) DEFAULT 0,
+            comment_id bigint(20) NOT NULL,
+            file_url varchar(500) NOT NULL,
+            created_at datetime DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (id),
-            UNIQUE KEY google_review_id (google_review_id),
-            KEY product_id (product_id)
+            KEY comment_id (comment_id)
         ) $charset_collate;";
         dbDelta($sql);
+        
+        // Create review submission page
+        $this->create_review_submission_page();
         
         // Default settings with all new features
         $default_settings = array(
             // Basic settings
+            'enable_reminders' => true,
             'reminder_days' => 7,
+            'from_email' => get_option('admin_email'),
+            'from_name' => get_bloginfo('name'),
+            'fake_review_enabled' => false,
             
             // Template A - Default/Professional
-            'email_subject' => 'We\'d love your feedback on your recent order!',
-            'email_subject_a' => 'We\'d love your feedback on your recent order!',
+            'email_subject' => "We'd love your feedback on your recent order!",
+            'email_subject_a' => "We'd love your feedback on your recent order!",
             'email_heading' => 'How was your experience?',
             'email_heading_a' => 'How was your experience?',
-            'email_message' => 'Hi {customer_name},
-
-Thank you for choosing us for your recent purchase! We hope you\'re enjoying your order.
-
-Your opinion matters to us and helps other customers make informed decisions. We\'d be grateful if you could take a moment to share your experience.
-
-<strong>What to expect:</strong>
-• Quick and easy review process
-• Help others discover great products
-• Your honest feedback helps us improve
-
-Click the button below to leave your review. It only takes a minute!',
-            'email_message_a' => 'Hi {customer_name},
-
-Thank you for choosing us for your recent purchase! We hope you\'re enjoying your order.
-
-Your opinion matters to us and helps other customers make informed decisions. We\'d be grateful if you could take a moment to share your experience.
-
-<strong>What to expect:</strong>
-• Quick and easy review process
-• Help others discover great products
-• Your honest feedback helps us improve
-
-Click the button below to leave your review. It only takes a minute!',
+            'email_message' => "Hi {customer_name},\n\nThank you for choosing us for your recent purchase! We hope you're enjoying your order.\n\nYour opinion matters to us and helps other customers make informed decisions. We'd be grateful if you could take a moment to share your experience.\n\n<strong>What to expect:</strong>\n• Quick and easy review process\n• Help others discover great products\n• Your honest feedback helps us improve\n\nClick the button below to leave your review. It only takes a minute!",
+            'email_message_a' => "Hi {customer_name},\n\nThank you for choosing us for your recent purchase! We hope you're enjoying your order.\n\nYour opinion matters to us and helps other customers make informed decisions. We'd be grateful if you could take a moment to share your experience.\n\n<strong>What to expect:</strong>\n• Quick and easy review process\n• Help others discover great products\n• Your honest feedback helps us improve\n\nClick the button below to leave your review. It only takes a minute!",
             'button_text' => 'Leave a Review',
             'button_text_a' => 'Leave a Review',
             'button_color' => '#667eea',
@@ -416,104 +364,42 @@ Click the button below to leave your review. It only takes a minute!',
             'incentive_message_a' => 'Leave a review and get 10% off your next purchase!',
             
             // Template B - Friendly/Casual
-            'email_subject_b' => 'How\'s your order treating you?',
-            'email_heading_b' => 'We\'d Love Your Feedback! 💜',
-            'email_message_b' => 'Hey {customer_name}! 👋
-
-We hope you\'re loving your recent order from {store_name}!
-
-We\'re always working to make shopping with us even better, and your thoughts really help. Got a minute to share what you think?
-
-<strong>Why your review matters:</strong>
-✨ Helps fellow shoppers find their perfect products
-✨ Shows us what we\'re doing right (and what we can improve!)
-✨ Takes less than 60 seconds
-
-Ready to share your experience? Just click below!',
+            'email_subject_b' => "How's your order treating you?",
+            'email_heading_b' => "We'd Love Your Feedback! 💜",
+            'email_message_b' => "Hey {customer_name}! 👋\n\nWe hope you're loving your recent order from {store_name}!\n\nWe're always working to make shopping with us even better, and your thoughts really help. Got a minute to share what you think?\n\n<strong>Why your review matters:</strong>\n✨ Helps fellow shoppers find their perfect products\n✨ Shows us what we're doing right (and what we can improve!)\n✨ Takes less than 60 seconds\n\nReady to share your experience? Just click below!",
             'button_text_b' => 'Share My Thoughts',
             'button_color_b' => '#4CAF50',
             
             // Template C - Urgent/FOMO
             'email_subject_c' => '⭐ Quick favor? We need your input!',
             'email_heading_c' => 'Your Opinion = Big Impact',
-            'email_message_c' => 'Hi {customer_name},
-
-You recently ordered from us, and we\'re on a mission to become even better!
-
-<strong>Here\'s the deal:</strong> We read every single review. Your feedback directly influences what products we carry, how we package items, and the overall shopping experience.
-
-<strong>Quick stats:</strong>
-📊 Reviews influence 93% of shopping decisions
-⭐ Products with reviews sell 3x more
-💡 Your insight helps us stock what YOU want
-
-Make your voice heard - it takes just 30 seconds!',
+            'email_message_c' => "Hi {customer_name},\n\nYou recently ordered from us, and we're on a mission to become even better!\n\n<strong>Here's the deal:</strong> We read every single review. Your feedback directly influences what products we carry, how we package items, and the overall shopping experience.\n\n<strong>Quick stats:</strong>\n📊 Reviews influence 93% of shopping decisions\n⭐ Products with reviews sell 3x more\n💡 Your insight helps us stock what YOU want\n\nMake your voice heard - it takes just 30 seconds!",
             'button_text_c' => 'Write My Review Now',
             'button_color_c' => '#9C27B0',
             
             'enable_reminders' => true,
             'fake_review_enabled' => false,
             
-            // SMS Integration
-            'enable_sms' => false,
-            'twilio_account_sid' => '',
-            'twilio_auth_token' => '',
-            'twilio_phone_number' => '',
-            'sms_message' => 'Hi {customer_name}! Thanks for your order. We\'d love your feedback: {review_url}',
-            
-            // Multi-Product Reviews
-            'enable_multi_product' => true,
-            'max_products_per_email' => 5,
-            'multi_email_subject' => 'How did we do? Review your items',
-            'multi_email_intro' => 'Hi {customer_name},\n\nThank you for your order! We\'d love to hear your thoughts on each of your items:',
-            'multi_product_prompt' => 'How would you rate this product?',
-            
-            // Photo/Video Reviews
-            'enable_photo_reviews' => true,
-            'enable_video_reviews' => true,
-            'max_media_files' => 5,
-            'max_file_size' => 10,
-            
-            // Incentives & Rewards
-            'enable_incentives' => false,
-            'incentive_type' => 'coupon',
-            'coupon_amount' => 10,
-            'coupon_type' => 'percent',
-            'coupon_expiry_days' => 30,
-            'points_amount' => 100,
-            
-            // A/B Testing
-            'enable_ab_testing' => false,
-            
             // QR Code in Emails
             'enable_qr_code' => true,
             'qr_code_size' => 200,
             
-            // Google Reviews Integration
-            'enable_google_reviews' => false,
-            'google_place_id' => '',
-            'google_api_key' => '',
-            'auto_import_google_reviews' => false,
-            'google_sync_interval' => 'daily',
-            
-            // Bulk Actions
-            'bulk_send_limit' => 50,
-            
-            // Smart Timing
-            'enable_smart_timing' => false,
-            'preferred_send_hour' => 10,
+            // Custom Review Page
+            'use_custom_review_page' => true,
             
             // Product Blacklist
             'enable_product_blacklist' => true,
             
-            // Follow-up Sequences
-            'enable_followup' => false,
+            // Media Uploads (optimized)
+            'enable_photo_reviews' => true,
+            'max_media_files' => 3,
+            'max_file_size' => 5,
             'followup_count' => 2,
             'followup_interval' => 7,
             'followup1_subject' => 'Still waiting to hear from you...',
-            'followup1_message' => 'Hi {customer_name},\n\nWe noticed you haven\'t left a review yet. Your feedback is incredibly valuable to us!\n\nIt only takes a minute and helps us improve.',
+            'followup1_message' => "Hi {customer_name},\n\nWe noticed you haven't left a review yet. Your feedback is incredibly valuable to us!\n\nIt only takes a minute and helps us improve.",
             'followup2_subject' => 'Last chance - Share your feedback!',
-            'followup2_message' => 'Hi {customer_name},\n\nThis is our final request for your review. We really want to hear your thoughts!\n\nAs a thank you, we\'re offering a special discount on your next order.',
+            'followup2_message' => "Hi {customer_name},\n\nThis is our final request for your review. We really want to hear your thoughts!\n\nAs a thank you, we're offering a special discount on your next order.",
             
             // Review Moderation
             'enable_moderation' => false,
@@ -544,6 +430,508 @@ Make your voice heard - it takes just 30 seconds!',
     public function deactivate() {
         // Clear scheduled events
         wp_clear_scheduled_hook('arm_send_review_reminder');
+        
+        // Optionally delete the review submission page
+        // (commented out to preserve page if reactivating)
+        // $page_id = get_option('arm_review_page_id');
+        // if ($page_id) {
+        //     wp_delete_post($page_id, true);
+        // }
+    }
+    
+    /**
+     * AJAX handler to manually create database tables
+     */
+    public function ajax_create_tables() {
+        check_ajax_referer('arm_nonce', 'nonce');
+        
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized');
+        }
+        
+        // Call activation to create tables
+        $this->activate();
+        
+        // Verify tables were created
+        global $wpdb;
+        $tables_to_check = array(
+            'arm_reminders',
+            'arm_ab_tests',
+            'arm_review_media',
+            'arm_incentives',
+            'arm_email_tracking',
+            'arm_analytics',
+            'arm_sms_log',
+            'arm_moderation',
+            'arm_product_blacklist',
+            'arm_google_reviews'
+        );
+        
+        $missing_tables = array();
+        foreach ($tables_to_check as $table) {
+            $table_name = $wpdb->prefix . $table;
+            $exists = $wpdb->get_var("SHOW TABLES LIKE '{$table_name}'");
+            if (!$exists) {
+                $missing_tables[] = $table;
+            }
+        }
+        
+        if (empty($missing_tables)) {
+            wp_send_json_success(array(
+                'message' => 'All 10 database tables created successfully!'
+            ));
+        } else {
+            wp_send_json_error(array(
+                'message' => 'Some tables could not be created: ' . implode(', ', $missing_tables),
+                'missing' => $missing_tables
+            ));
+        }
+    }
+    
+    /**
+     * AJAX handler for inline review submission
+     */
+    public function ajax_submit_inline_review() {
+        // Verify nonce
+        $product_id = isset($_POST['product_id']) ? intval($_POST['product_id']) : 0;
+        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'arm_submit_review_' . $product_id)) {
+            wp_send_json_error('Invalid security token');
+        }
+        
+        $order_id = isset($_POST['order_id']) ? intval($_POST['order_id']) : 0;
+        $customer_email = isset($_POST['customer_email']) ? sanitize_email($_POST['customer_email']) : '';
+        $rating = isset($_POST['rating']) ? intval($_POST['rating']) : 0;
+        $review_title = isset($_POST['review_title']) ? sanitize_text_field($_POST['review_title']) : '';
+        $review_text = isset($_POST['review_text']) ? sanitize_textarea_field($_POST['review_text']) : '';
+        
+        // Validate
+        if (!$product_id || !$order_id || !$customer_email || !$rating || !$review_text) {
+            wp_send_json_error('Please fill in all required fields');
+        }
+        
+        if ($rating < 1 || $rating > 5) {
+            wp_send_json_error('Invalid rating');
+        }
+        
+        // Verify the order belongs to this email
+        $order = wc_get_order($order_id);
+        if (!$order || $order->get_billing_email() !== $customer_email) {
+            wp_send_json_error('Invalid order');
+        }
+        
+        // Verify product exists and is a WooCommerce product
+        $product = wc_get_product($product_id);
+        if (!$product) {
+            wp_send_json_error('Invalid product');
+        }
+        
+        // If this is a variation, get the parent product ID
+        $review_product_id = $product_id;
+        if ($product->is_type('variation')) {
+            $review_product_id = $product->get_parent_id();
+        }
+        
+        // Check if already reviewed (check all statuses - approved, pending, etc.)
+        $existing_review = get_comments(array(
+            'post_id' => $review_product_id,
+            'author_email' => $customer_email,
+            'type' => 'review',
+            'status' => array('approve', 'hold', '0', '1'), // Exclude trash/spam
+            'number' => 1
+        ));
+        
+        if (!empty($existing_review)) {
+            wp_send_json_error('You have already reviewed this product');
+        }
+        
+        // Create review comment - WooCommerce compatible
+        $comment_data = array(
+            'comment_post_ID' => $review_product_id,
+            'comment_author' => $order->get_billing_first_name(),
+            'comment_author_email' => $customer_email,
+            'comment_content' => $review_text,
+            'comment_type' => 'review',
+            'comment_parent' => 0,
+            'user_id' => 0,
+            'comment_approved' => 1, // Auto-approve since it's from verified purchaser
+            'comment_date' => current_time('mysql'),
+            'comment_date_gmt' => current_time('mysql', 1)
+        );
+        
+        $comment_id = wp_insert_comment($comment_data);
+        
+        if ($comment_id) {
+            $debug_info = array(
+                'comment_id' => $comment_id,
+                'product_id' => $product_id,
+                'post_type' => get_post_type($product_id),
+                'comment_type' => get_comment_type($comment_id),
+                'comment_approved' => get_comment($comment_id)->comment_approved,
+                'rating' => intval($rating)
+            );
+            
+            // Add rating meta (WooCommerce standard)
+            update_comment_meta($comment_id, 'rating', intval($rating));
+            update_comment_meta($comment_id, 'verified', 1);
+            
+            // Trigger WooCommerce hooks to update product rating
+            do_action('comment_post', $comment_id, 1);
+            do_action('woocommerce_product_review_comment_approved', $comment_id);
+            
+            // Update product rating cache and recalculate average (manual calculation)
+            WC_Comments::clear_transients($review_product_id);
+            
+            // Calculate average rating manually
+            global $wpdb;
+            $rating_data = $wpdb->get_row($wpdb->prepare("
+                SELECT COUNT(*) as count, AVG(meta_value) as average
+                FROM {$wpdb->commentmeta}
+                INNER JOIN {$wpdb->comments} ON {$wpdb->commentmeta}.comment_id = {$wpdb->comments}.comment_ID
+                WHERE meta_key = 'rating'
+                AND comment_post_ID = %d
+                AND comment_approved = '1'
+                AND meta_value > 0
+            ", $review_product_id));
+            
+            $avg_rating = $rating_data && $rating_data->average ? round($rating_data->average, 2) : 0;
+            $review_count = $rating_data && $rating_data->count ? intval($rating_data->count) : 0;
+            
+            update_post_meta($review_product_id, '_wc_average_rating', $avg_rating);
+            update_post_meta($review_product_id, '_wc_review_count', $review_count);
+            update_post_meta($review_product_id, '_wc_rating_count', $review_count);
+            
+            // If review title provided, store it
+            if ($review_title) {
+                update_comment_meta($comment_id, 'review_title', $review_title);
+            }
+            
+            // Update reminder record to mark review as submitted
+            global $wpdb;
+            $table_name = $wpdb->prefix . 'arm_reminders';
+            $wpdb->update(
+                $table_name,
+                array('review_submitted' => 1),
+                array('order_id' => $order_id),
+                array('%d'),
+                array('%d')
+            );
+            
+            // Track in analytics if table exists
+            $analytics_table = $wpdb->prefix . 'arm_analytics';
+            if ($wpdb->get_var("SHOW TABLES LIKE '{$analytics_table}'")) {
+                $wpdb->insert(
+                    $analytics_table,
+                    array(
+                        'reminder_id' => 0,
+                        'order_id' => $order_id,
+                        'customer_email' => $customer_email,
+                        'review_submitted' => 1,
+                        'submitted_date' => current_time('mysql')
+                    )
+                );
+            }
+            
+            wp_send_json_success(array(
+                'message' => 'Review submitted successfully!',
+                'comment_id' => $comment_id,
+                'debug' => array(
+                    'original_product_id' => $product_id,
+                    'review_product_id' => $review_product_id,
+                    'is_variation' => $product->is_type('variation'),
+                    'product_type' => get_post_type($review_product_id),
+                    'comment_type' => get_comment_type($comment_id),
+                    'rating' => intval($rating),
+                    'avg_rating' => $avg_rating,
+                    'review_count' => $review_count
+                )
+            ));
+        } else {
+            wp_send_json_error('Failed to submit review. Please try again.');
+        }
+    }
+    
+    /**
+     * Handle media upload for reviews (optimized for performance)
+     */
+    public function ajax_upload_review_media() {
+        check_ajax_referer('arm_review_nonce_' . $_POST['product_id'], 'nonce');
+        
+        $comment_id = intval($_POST['comment_id']);
+        $settings = get_option('arm_settings');
+        
+        // Check if media uploads enabled
+        if (empty($settings['enable_photo_reviews'])) {
+            wp_send_json_error('Media uploads are disabled');
+        }
+        
+        // Validate comment exists
+        if (!get_comment($comment_id)) {
+            wp_send_json_error('Invalid review');
+        }
+        
+        // Check file limits
+        $max_files = isset($settings['max_media_files']) ? intval($settings['max_media_files']) : 3;
+        $max_size_mb = isset($settings['max_file_size']) ? intval($settings['max_file_size']) : 5;
+        $max_size_bytes = $max_size_mb * 1024 * 1024;
+        
+        global $wpdb;
+        $media_table = $wpdb->prefix . 'arm_review_media';
+        
+        // Check existing media count
+        $existing_count = $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM {$media_table} WHERE comment_id = %d",
+            $comment_id
+        ));
+        
+        if ($existing_count >= $max_files) {
+            wp_send_json_error("Maximum {$max_files} files allowed");
+        }
+        
+        // Validate file upload
+        if (empty($_FILES['media_file'])) {
+            wp_send_json_error('No file uploaded');
+        }
+        
+        $file = $_FILES['media_file'];
+        
+        // Check file size
+        if ($file['size'] > $max_size_bytes) {
+            wp_send_json_error("File too large. Max {$max_size_mb}MB");
+        }
+        
+        // Check file type (JPG and PNG only for performance and compatibility)
+        $allowed_types = array('image/jpeg', 'image/jpg', 'image/png');
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        $mime_type = finfo_file($finfo, $file['tmp_name']);
+        finfo_close($finfo);
+        
+        if (!in_array($mime_type, $allowed_types)) {
+            wp_send_json_error('Only JPG and PNG images allowed');
+        }
+        
+        // Upload file using WordPress
+        require_once(ABSPATH . 'wp-admin/includes/file.php');
+        
+        $upload = wp_handle_upload($file, array(
+            'test_form' => false,
+            'mimes' => array(
+                'jpg|jpeg' => 'image/jpeg',
+                'png' => 'image/png'
+            )
+        ));
+        
+        if (isset($upload['error'])) {
+            wp_send_json_error($upload['error']);
+        }
+        
+        // Store in database (without file_type for compatibility)
+        $wpdb->insert(
+            $media_table,
+            array(
+                'comment_id' => $comment_id,
+                'file_url' => $upload['url'],
+                'created_at' => current_time('mysql')
+            ),
+            array('%d', '%s', '%s')
+        );
+        
+        $insert_id = $wpdb->insert_id;
+        
+        wp_send_json_success(array(
+            'url' => $upload['url'],
+            'message' => 'Image uploaded successfully'
+        ));
+    }
+    
+    /**
+     * Create a dedicated WordPress page for review submissions
+     */
+    private function create_review_submission_page() {
+        // Check if page already exists by ID
+        $existing_page_id = get_option('arm_review_page_id');
+        if ($existing_page_id && get_post($existing_page_id)) {
+            return $existing_page_id;
+        }
+        
+        // Check if a page with this slug already exists
+        $existing_page = get_page_by_path('submit-review');
+        if ($existing_page) {
+            update_option('arm_review_page_id', $existing_page->ID);
+            return $existing_page->ID;
+        }
+        
+        // Check if page with shortcode already exists
+        global $wpdb;
+        $existing = $wpdb->get_var($wpdb->prepare(
+            "SELECT ID FROM {$wpdb->posts} 
+            WHERE post_type = 'page' 
+            AND post_status = 'publish'
+            AND post_content LIKE %s
+            LIMIT 1",
+            '%[arm_review_submission]%'
+        ));
+        if ($existing) {
+            update_option('arm_review_page_id', $existing);
+            return $existing;
+        }
+        
+        // Create the page only if none exists
+        $page_data = array(
+            'post_title'    => 'Submit Your Review',
+            'post_content'  => '[arm_review_submission]',
+            'post_status'   => 'publish',
+            'post_type'     => 'page',
+            'post_author'   => 1,
+            'post_name'     => 'submit-review',
+            'comment_status' => 'closed',
+            'ping_status'   => 'closed'
+        );
+        
+        $page_id = wp_insert_post($page_data);
+        
+        if ($page_id && !is_wp_error($page_id)) {
+            update_option('arm_review_page_id', $page_id);
+            return $page_id;
+        } else {
+            return false;
+        }
+    }
+    
+    /**
+     * Remove old rewrite-based system (no longer used)
+     */
+    public function add_review_submission_rewrite() {
+        // Deprecated - keeping for backward compatibility
+        // Now using a real WordPress page instead
+    }
+    
+    /**
+     * Render review submission page via shortcode
+     */
+    public function render_review_submission_page($atts) {
+        // Verify required parameters
+        $order_id = isset($_GET['order_id']) ? intval($_GET['order_id']) : 0;
+        $email = isset($_GET['email']) ? sanitize_email($_GET['email']) : '';
+        $token = isset($_GET['token']) ? sanitize_text_field($_GET['token']) : '';
+        
+        // Validate token
+        $expected_token = $this->generate_review_token($order_id, $email);
+        
+        if (!$order_id || !$email || !$token || $token !== $expected_token) {
+            return '<div class="arm-error" style="padding: 40px; text-align: center; max-width: 600px; margin: 40px auto; background: #fee; border: 2px solid #c33; border-radius: 8px;">
+                <h2 style="color: #c33; margin-bottom: 15px;">⚠️ Invalid Review Link</h2>
+                <p style="font-size: 16px; color: #666;">This review link is invalid or has expired. Please contact support if you believe this is an error.</p>
+            </div>';
+        }
+        
+        // Get order
+        $order = wc_get_order($order_id);
+        if (!$order || $order->get_billing_email() !== $email) {
+            return '<div class="arm-error" style="padding: 40px; text-align: center; max-width: 600px; margin: 40px auto; background: #fee; border: 2px solid #c33; border-radius: 8px;">
+                <h2 style="color: #c33; margin-bottom: 15px;">⚠️ Invalid Order</h2>
+                <p style="font-size: 16px; color: #666;">We couldn\'t find your order or the email address doesn\'t match.</p>
+            </div>';
+        }
+        
+        // Get order products
+        $items = $order->get_items();
+        
+        // Start output buffering to capture the template
+        ob_start();
+        include plugin_dir_path(__FILE__) . 'templates/review-submission-page.php';
+        return ob_get_clean();
+    }
+    
+    /**
+     * Deprecated - Old template_redirect handler (no longer used)
+     */
+    public function handle_review_submission_page() {
+        // Kept for backward compatibility
+        // Now using shortcode on a real WordPress page
+    }
+    
+    /**
+     * Show admin notice if review page is missing
+     */
+    /**
+     * Get the review submission page URL
+     */
+    private function get_review_page_url($order = null) {
+        $settings = get_option('arm_settings');
+        
+        // Check if custom page is enabled (default to true)
+        $use_custom_page = true;
+        if (isset($settings['use_custom_review_page'])) {
+            $use_custom_page = filter_var($settings['use_custom_review_page'], FILTER_VALIDATE_BOOLEAN);
+        }
+        
+        if ($use_custom_page) {
+            // First check if page ID is saved
+            $page_id = get_option('arm_review_page_id');
+            
+            if ($page_id && get_post($page_id)) {
+                return get_permalink($page_id);
+            }
+            
+            // Try to find page by slug
+            $page = get_page_by_path('submit-review');
+            if ($page) {
+                update_option('arm_review_page_id', $page->ID);
+                return get_permalink($page->ID);
+            }
+            
+            // Try to find page with shortcode
+            global $wpdb;
+            $found_id = $wpdb->get_var("SELECT ID FROM {$wpdb->posts} WHERE post_type = 'page' AND post_status = 'publish' AND post_content LIKE '%[arm_review_submission]%' LIMIT 1");
+            if ($found_id) {
+                update_option('arm_review_page_id', $found_id);
+                return get_permalink($found_id);
+            }
+            
+            // If still no page, try to create it
+            $created_id = $this->create_review_submission_page();
+            if ($created_id) {
+                return get_permalink($created_id);
+            }
+        }
+        
+        // Fallback: Use first product URL from order
+        if ($order) {
+            $items = $order->get_items();
+            foreach ($items as $item) {
+                $product = $item->get_product();
+                if ($product) {
+                    return get_permalink($product->get_id()) . '#review_form_wrapper';
+                }
+            }
+        }
+        
+        // Final fallback
+        return home_url('/submit-review/');
+    }
+    
+    /**
+     * Show admin notice to flush permalinks after plugin update
+     * (Deprecated - no longer needed with real page)
+     */
+    public function show_permalink_flush_notice() {
+        // No longer needed - using real WordPress page
+    }
+    
+    /**
+     * Handle permalink flush action
+     */
+    public function handle_flush_permalinks() {
+        if (!current_user_can('manage_options')) {
+            wp_die('Unauthorized');
+        }
+        
+        $this->add_review_submission_rewrite();
+        flush_rewrite_rules();
+        update_option('arm_permalinks_flushed_v2', true);
+        
+        wp_redirect(admin_url('admin.php?page=advanced-review-manager&permalinks_flushed=1'));
+        exit;
     }
     
     public function add_admin_menu() {
@@ -586,24 +974,6 @@ Make your voice heard - it takes just 30 seconds!',
         
         add_submenu_page(
             'advanced-review-manager',
-            'Analytics',
-            'Analytics',
-            'manage_options',
-            'arm-analytics',
-            array($this, 'render_analytics')
-        );
-        
-        add_submenu_page(
-            'advanced-review-manager',
-            'Fake Reviews',
-            'Fake Reviews',
-            'manage_options',
-            'arm-fake-reviews',
-            array($this, 'render_fake_reviews')
-        );
-        
-        add_submenu_page(
-            'advanced-review-manager',
             'Bulk Actions',
             'Bulk Actions',
             'manage_options',
@@ -620,13 +990,14 @@ Make your voice heard - it takes just 30 seconds!',
             array($this, 'render_product_blacklist')
         );
         
+        // TEMPORARY DEBUG PAGE - REMOVE BEFORE PRODUCTION
         add_submenu_page(
             'advanced-review-manager',
-            'Google Reviews',
-            'Google Reviews',
+            '🔧 DEBUG Email Test',
+            '🔧 DEBUG Email Test',
             'manage_options',
-            'arm-google-reviews',
-            array($this, 'render_google_reviews')
+            'arm-debug-email',
+            array($this, 'render_debug_email')
         );
     }
     
@@ -650,68 +1021,82 @@ Make your voice heard - it takes just 30 seconds!',
     }
     
     public function schedule_review_reminder($order_id) {
-        $settings = get_option('arm_settings');
+        error_log('ARM: schedule_review_reminder called for order #' . $order_id);
         
-        if (!isset($settings['enable_reminders']) || !$settings['enable_reminders']) {
-            return;
-        }
+        $settings = get_option('arm_settings', array());
+        
+        // Note: Don't check enable_reminders here - allow manual scheduling even if auto-reminders are disabled
         
         $order = wc_get_order($order_id);
         if (!$order) {
-            return;
+            error_log('ARM: Order #' . $order_id . ' not found in schedule_review_reminder');
+            return false;
         }
         
-        // Check product blacklist
-        if (isset($settings['enable_product_blacklist']) && $settings['enable_product_blacklist']) {
+        error_log('ARM: Order found, checking blacklist...');
+        
+        // Quick product blacklist check
+        if (!empty($settings['enable_product_blacklist'])) {
             global $wpdb;
             $blacklist_table = $wpdb->prefix . 'arm_product_blacklist';
             
             foreach ($order->get_items() as $item) {
                 $product_id = $item->get_product_id();
-                $is_blacklisted = $wpdb->get_var($wpdb->prepare(
-                    "SELECT id FROM $blacklist_table WHERE product_id = %d",
-                    $product_id
-                ));
-                
-                if ($is_blacklisted) {
-                    return; // Don't send reminder if any product is blacklisted
+                if ($wpdb->get_var($wpdb->prepare("SELECT id FROM $blacklist_table WHERE product_id = %d", $product_id))) {
+                    error_log('ARM: Order #' . $order_id . ' has blacklisted product #' . $product_id);
+                    return false; // Skip if blacklisted
                 }
             }
         }
+        
+        error_log('ARM: No blacklisted products, checking existing reminder...');
         
         global $wpdb;
         $table_name = $wpdb->prefix . 'arm_reminders';
         
         // Check if reminder already exists
-        $existing = $wpdb->get_var($wpdb->prepare(
-            "SELECT id FROM $table_name WHERE order_id = %d",
-            $order_id
-        ));
-        
-        if (!$existing) {
-            $wpdb->insert(
-                $table_name,
-                array(
-                    'order_id' => $order_id,
-                    'customer_email' => $order->get_billing_email(),
-                    'reminder_sent' => 0,
-                    'created_at' => current_time('mysql')
-                ),
-                array('%d', '%s', '%d', '%s')
-            );
+        $existing = $wpdb->get_var($wpdb->prepare("SELECT id FROM $table_name WHERE order_id = %d", $order_id));
+        if ($existing) {
+            error_log('ARM: Reminder already exists for order #' . $order_id . ' (ID: ' . $existing . ')');
+            return false; // Already scheduled
         }
         
-        // Schedule reminder with smart timing if enabled
+        error_log('ARM: No existing reminder, inserting new record...');
+        
+        // Insert reminder record
+        $insert_result = $wpdb->insert(
+            $table_name,
+            array(
+                'order_id' => $order_id,
+                'customer_email' => $order->get_billing_email(),
+                'reminder_sent' => 0,
+                'created_at' => current_time('mysql')
+            ),
+            array('%d', '%s', '%d', '%s')
+        );
+        
+        if ($insert_result === false) {
+            error_log('ARM: Database insert failed. Error: ' . $wpdb->last_error);
+            return false;
+        }
+        
+        error_log('ARM: Reminder record inserted with ID: ' . $wpdb->insert_id);
+        
+        // Schedule reminder
         $reminder_days = isset($settings['reminder_days']) ? intval($settings['reminder_days']) : 7;
+        $timestamp = time() + ($reminder_days * DAY_IN_SECONDS);
         
-        if (isset($settings['enable_smart_timing']) && $settings['enable_smart_timing']) {
-            $optimal_hour = $this->get_optimal_send_time();
-            $timestamp = strtotime("+{$reminder_days} days {$optimal_hour}:00:00");
-        } else {
-            $timestamp = time() + ($reminder_days * DAY_IN_SECONDS);
+        error_log('ARM: Scheduling cron event for ' . date('Y-m-d H:i:s', $timestamp) . ' (' . $reminder_days . ' days from now)');
+        
+        $scheduled = wp_schedule_single_event($timestamp, 'arm_send_review_reminder', array($order_id));
+        
+        if ($scheduled === false) {
+            error_log('ARM: wp_schedule_single_event failed');
+            return false;
         }
         
-        wp_schedule_single_event($timestamp, 'arm_send_review_reminder', array($order_id));
+        error_log('ARM: Cron event scheduled successfully');
+        return true;
     }
     
     public function send_review_reminder($order_id) {
@@ -749,67 +1134,134 @@ Make your voice heard - it takes just 30 seconds!',
     }
     
     private function send_review_email($order) {
-        $settings = get_option('arm_settings');
-        $customer_email = $order->get_billing_email();
-        $customer_name = $order->get_billing_first_name();
+        $error_details = array();
         
-        // Generate review token and URL
-        $review_url = add_query_arg(array(
-            'order_id' => $order->get_id(),
-            'email' => $customer_email,
-            'token' => $this->generate_review_token($order->get_id(), $customer_email)
-        ), home_url('/review-submission/'));
-        
-        // Generate QR code if enabled
-        $qr_code_html = '';
-        if (isset($settings['enable_qr_code']) && $settings['enable_qr_code']) {
-            $qr_size = isset($settings['qr_code_size']) ? intval($settings['qr_code_size']) : 200;
-            // Use Google Charts API for QR code generation
-            $qr_url = 'https://chart.googleapis.com/chart?cht=qr&chs=' . $qr_size . 'x' . $qr_size . '&chl=' . urlencode($review_url);
-            $qr_code_html = '
-            <div style="text-align: center; margin: 30px 0;">
-                <p style="font-size: 14px; color: #666; margin-bottom: 10px;">Or scan this QR code:</p>
-                <a href="' . esc_url($review_url) . '" style="display: inline-block;">
-                    <img src="' . esc_url($qr_url) . '" alt="QR Code" style="max-width: ' . $qr_size . 'px; border: 2px solid #e0e0e0; border-radius: 8px; padding: 10px; background: white;" />
-                </a>
-                <p style="font-size: 12px; color: #999; margin-top: 10px;">Scan with your phone camera</p>
-            </div>';
-        }
-        
-        // Get order products
-        $items = $order->get_items();
-        $product_names_html = '';
-        foreach ($items as $item) {
-            $product = $item->get_product();
-            if ($product) {
-                $product_names_html .= '<li>' . esc_html($product->get_name()) . '</li>';
+        try {
+            $settings = get_option('arm_settings', array());
+            
+            // CRITICAL: Ensure email_subject always has a value
+            if (empty($settings['email_subject'])) {
+                $settings['email_subject'] = "We'd love your feedback, {customer_name}!";
             }
-        }
-        
-        // Build incentive section if enabled
-        $incentive_section = '';
-        if (!empty($settings['enable_incentives']) && !empty($settings['show_incentive_a'])) {
-            $incentive_message = $settings['incentive_message_a'] ?? 'Leave a review and get 10% off your next purchase!';
-            $incentive_section = '
-            <div class="incentive-banner">
-                <span class="incentive-icon">🎁</span>
-                <h3>Special Reward</h3>
-                <p>' . esc_html($incentive_message) . '</p>
-            </div>';
-        }
-        
-        // Get site info
-        $store_name = get_bloginfo('name');
-        $site_name = $store_name; // for backward compatibility
-        $store_url = home_url();
-        $order_number = $order->get_order_number();
-        
-        // Load email template
-        ob_start();
-        include plugin_dir_path(__FILE__) . 'templates/customer-email.php';
-        $email_html = ob_get_clean();
-        
-        // Replace placeholders
+            if (empty($settings['email_heading'])) {
+                $settings['email_heading'] = "How was your experience?";
+            }
+            if (empty($settings['email_message'])) {
+                $settings['email_message'] = "Hi {customer_name},\n\nWe hope you're having a great experience with the items from your recent order.\n\nAs a small business, your feedback is essential. It not only helps us improve our products and services but also helps other customers like you make informed decisions.\n\nCould you spare a minute or two to tell us about your experience with this order?\n\nWe truly value your opinion and thank you for being a valued customer!\n\nBest regards,\nThe {store_name} Team";
+            }
+            
+            $customer_email = $order->get_billing_email();
+            $customer_name = $order->get_billing_first_name();
+            
+            $error_details['order_id'] = $order->get_id();
+            $error_details['customer_email'] = $customer_email;
+            $error_details['customer_name'] = $customer_name;
+            
+            // Validation: Check customer email
+            if (empty($customer_email) || !is_email($customer_email)) {
+                $error_details['error'] = 'Invalid customer email';
+                error_log('ARM Error: ' . json_encode($error_details));
+                throw new Exception('Invalid customer email address: ' . $customer_email);
+            }
+            
+            // Fallback if customer name is empty
+            if (empty($customer_name)) {
+                $customer_name = 'Valued Customer';
+            }
+            
+            // Validation: Check from email
+            $from_email = isset($settings['from_email']) ? $settings['from_email'] : get_option('admin_email');
+            $error_details['from_email'] = $from_email;
+            
+            if (empty($from_email) || !is_email($from_email)) {
+                $error_details['error'] = 'Invalid from_email';
+                error_log('ARM Error: ' . json_encode($error_details));
+                throw new Exception('Invalid from email address in settings: ' . $from_email);
+            }
+            
+            $error_details['email_subject'] = $settings['email_subject'];
+            $error_details['email_message_length'] = strlen($settings['email_message']);
+            
+            // Generate review token and URL
+            $review_url = add_query_arg(array(
+                'order_id' => $order->get_id(),
+                'email' => $customer_email,
+                'token' => $this->generate_review_token($order->get_id(), $customer_email)
+            ), $this->get_review_page_url($order));
+            
+            // Generate QR code if enabled
+            $qr_code_html = '';
+            if (isset($settings['enable_qr_code']) && $settings['enable_qr_code']) {
+                $qr_size = isset($settings['qr_code_size']) ? intval($settings['qr_code_size']) : 200;
+                $qr_url = 'https://api.qrserver.com/v1/create-qr-code/?size=' . $qr_size . 'x' . $qr_size . '&data=' . urlencode($review_url);
+                $qr_code_html = '
+                <div style="text-align: center; margin: 30px 0;">
+                    <p style="font-size: 14px; color: #666; margin-bottom: 10px;">Or scan this QR code:</p>
+                    <a href="' . esc_url($review_url) . '" style="display: inline-block;">
+                        <img src="' . esc_url($qr_url) . '" alt="QR Code" style="max-width: ' . $qr_size . 'px; border: 2px solid #e0e0e0; border-radius: 8px; padding: 10px; background: white;" />
+                    </a>
+                    <p style="font-size: 12px; color: #999; margin-top: 10px;">Scan with your phone camera</p>
+                </div>';
+            }
+            
+            // Get order products
+            $items = $order->get_items();
+            $product_names_html = '';
+            foreach ($items as $item) {
+                $product = $item->get_product();
+                if ($product) {
+                    $product_names_html .= '<li>' . esc_html($product->get_name()) . '</li>';
+                }
+            }
+            
+            // Build incentive section if enabled
+            $incentive_section = '';
+            if (!empty($settings['enable_incentives']) && !empty($settings['show_incentive_a'])) {
+                $incentive_message = $settings['incentive_message_a'] ?? 'Leave a review and get 10% off your next purchase!';
+                $incentive_section = '
+                <div class="incentive-banner">
+                    <span class="incentive-icon">🎁</span>
+                    <h3>Special Reward</h3>
+                    <p>' . esc_html($incentive_message) . '</p>
+                </div>';
+            }
+            
+            // Get site info
+            $store_name = get_bloginfo('name');
+            $site_name = $store_name;
+            $store_url = home_url();
+            $order_number = $order->get_order_number();
+            
+            // Pre-replace placeholders in email_message before loading template
+            $email_message = $settings['email_message'] ?? '';
+            $email_message = str_replace('{customer_name}', $customer_name, $email_message);
+            $email_message = str_replace('{store_name}', $store_name, $email_message);
+            $email_message = str_replace('{order_number}', $order_number, $email_message);
+            
+            // Load email template
+            $template_path = plugin_dir_path(__FILE__) . 'templates/customer-email.php';
+            $error_details['template_path'] = $template_path;
+            $error_details['template_exists'] = file_exists($template_path);
+            
+            if (!file_exists($template_path)) {
+                $error_details['error'] = 'Template file not found';
+                error_log('ARM Error: ' . json_encode($error_details));
+                throw new Exception('Email template not found: ' . $template_path);
+            }
+            
+            ob_start();
+            include $template_path;
+            $email_html = ob_get_clean();
+            
+            if (empty($email_html)) {
+                $error_details['error'] = 'Template returned empty HTML';
+                error_log('ARM Error: ' . json_encode($error_details));
+                throw new Exception('Failed to load email template - HTML is empty');
+            }
+            
+            $error_details['email_html_length'] = strlen($email_html);
+            
+            // Replace placeholders
             $replacements = array(
                 '{customer_name}'   => $customer_name,
                 '{order_number}'   => $order_number,
@@ -826,14 +1278,68 @@ Make your voice heard - it takes just 30 seconds!',
             foreach ($replacements as $placeholder => $value) {
                 $email_html = str_replace($placeholder, $value, $email_html);
             }
-        
-        // Subject line
-        $subject = str_replace('{customer_name}', $customer_name, $settings['email_subject']);
-        $subject = str_replace('{store_name}', $store_name, $subject);
-        
-        // Send email
-        $headers = array('Content-Type: text/html; charset=UTF-8');
-        wp_mail($customer_email, $subject, $email_html, $headers);
+            
+            // Subject line
+            $subject = str_replace('{customer_name}', $customer_name, $settings['email_subject']);
+            $subject = str_replace('{store_name}', $store_name, $subject);
+            
+            if (empty($subject)) {
+                $error_details['error'] = 'Subject is empty after replacement';
+                error_log('ARM Error: ' . json_encode($error_details));
+                throw new Exception('Email subject is empty after placeholder replacement');
+            }
+            
+            $error_details['final_subject'] = $subject;
+            
+            // Prepare email headers with custom From email/name to avoid spam
+            $from_name = isset($settings['from_name']) ? $settings['from_name'] : get_bloginfo('name');
+            
+            $headers = array(
+                'Content-Type: text/html; charset=UTF-8',
+                'From: ' . $from_name . ' <' . $from_email . '>',
+                'Reply-To: ' . $from_email
+            );
+            
+            $error_details['from_name'] = $from_name;
+            $error_details['headers'] = $headers;
+            
+            // Send email and log result
+            $result = wp_mail($customer_email, $subject, $email_html, $headers);
+            
+            $error_details['wp_mail_result'] = $result;
+            
+            if ($result) {
+                error_log('ARM Success: ' . json_encode($error_details));
+            } else {
+                // Check for common issues
+                global $phpmailer;
+                if (isset($phpmailer) && is_object($phpmailer)) {
+                    $error_details['phpmailer_error'] = $phpmailer->ErrorInfo;
+                }
+                
+                $error_details['error'] = 'wp_mail returned false';
+                error_log('ARM Error: ' . json_encode($error_details));
+                
+                // Store error details for AJAX response
+                update_option('arm_last_email_error', $error_details, false);
+                
+                throw new Exception('wp_mail() failed. Details: ' . json_encode($error_details));
+            }
+            
+            return $result;
+            
+        } catch (Exception $e) {
+            $error_details['exception'] = $e->getMessage();
+            $error_details['trace'] = $e->getTraceAsString();
+            
+            error_log('ARM Exception: ' . json_encode($error_details));
+            
+            // Store error details for AJAX response
+            update_option('arm_last_email_error', $error_details, false);
+            
+            // Return false instead of throwing to prevent AJAX errors
+            return false;
+        }
     }
     
     private function generate_review_token($order_id, $email) {
@@ -873,15 +1379,15 @@ Make your voice heard - it takes just 30 seconds!',
         ));
         
         if (!$reminder) {
-            // Check if order is completed - offer to schedule
+            // Check if order is completed - offer to send now
             if ($order->get_status() === 'completed') {
                 echo '<div style="display: flex; flex-direction: column; gap: 4px;">';
                 echo '<span style="display: inline-flex; align-items: center; gap: 4px; color: #999; font-size: 11px;">';
                 echo '<span style="font-size: 14px;">⏸️</span>';
                 echo '<span>Not Set</span>';
                 echo '</span>';
-                echo '<a href="#" class="arm-schedule-reminder" data-order-id="' . esc_attr($post_id) . '" style="display: inline-flex; align-items: center; gap: 3px; padding: 3px 6px; background: #0073aa; color: #ffffff !important; border-radius: 3px; font-weight: 600; text-decoration: none; font-size: 10px; margin-top: 2px;">';
-                echo '<span>�</span>';
+                echo '<a href="#" class="arm-send-instant-reminder" data-order-id="' . esc_attr($post_id) . '" style="display: inline-flex; align-items: center; gap: 3px; padding: 3px 6px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #ffffff !important; border-radius: 3px; font-weight: 600; text-decoration: none; font-size: 10px; margin-top: 2px;">';
+                echo '<span>⚡</span>';
                 echo '<span>Send Now</span>';
                 echo '</a>';
                 echo '</div>';
@@ -910,7 +1416,7 @@ Make your voice heard - it takes just 30 seconds!',
             echo '</span>';
             echo '<a href="#" class="arm-send-instant-reminder" data-order-id="' . esc_attr($post_id) . '" style="display: inline-flex; align-items: center; gap: 3px; padding: 3px 6px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #ffffff !important; border-radius: 3px; font-weight: 600; text-decoration: none; font-size: 10px; margin-top: 2px;">';
             echo '<span>⚡</span>';
-            echo '<span>Send</span>';
+            echo '<span>Send Now</span>';
             echo '</a>';
             echo '</div>';
         }
@@ -925,48 +1431,151 @@ Make your voice heard - it takes just 30 seconds!',
         
         $order_id = intval($_POST['order_id']);
         
+        error_log('ARM: ajax_send_instant_reminder called for order #' . $order_id);
+        
         $order = wc_get_order($order_id);
         if (!$order) {
+            error_log('ARM: Order #' . $order_id . ' not found');
             wp_send_json_error('Order not found');
         }
         
-        $this->send_review_email($order);
+        error_log('ARM: Order found. Customer: ' . $order->get_billing_email());
+        error_log('ARM: Calling send_review_email()...');
+        
+        // Send email immediately
+        $result = $this->send_review_email($order);
+        
+        error_log('ARM: send_review_email() returned: ' . var_export($result, true));
+        
+        if (!$result) {
+            // Get detailed error from stored option
+            $error_details = get_option('arm_last_email_error', array());
+            $error_message = 'Failed to send email.';
+            
+            error_log('ARM: Email send failed. Error details: ' . json_encode($error_details));
+            
+            if (!empty($error_details)) {
+                if (isset($error_details['error'])) {
+                    $error_message .= ' Error: ' . $error_details['error'];
+                }
+                if (isset($error_details['phpmailer_error'])) {
+                    $error_message .= ' PHPMailer: ' . $error_details['phpmailer_error'];
+                }
+                if (isset($error_details['exception'])) {
+                    $error_message .= ' Exception: ' . $error_details['exception'];
+                }
+            }
+            
+            wp_send_json_error($error_message);
+        }
+        
+        error_log('ARM: Email sent successfully, updating database...');
         
         global $wpdb;
         $table_name = $wpdb->prefix . 'arm_reminders';
         
-        $wpdb->update(
-            $table_name,
-            array(
-                'reminder_sent' => 1,
-                'sent_date' => current_time('mysql')
-            ),
-            array('order_id' => $order_id),
-            array('%d', '%s'),
-            array('%d')
-        );
+        // Check if reminder record exists
+        $reminder = $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM $table_name WHERE order_id = %d",
+            $order_id
+        ));
+        
+        error_log('ARM: Existing reminder record: ' . json_encode($reminder));
+        
+        if ($reminder) {
+            // Update existing record
+            $update_result = $wpdb->update(
+                $table_name,
+                array(
+                    'reminder_sent' => 1,
+                    'sent_date' => current_time('mysql')
+                ),
+                array('order_id' => $order_id),
+                array('%d', '%s'),
+                array('%d')
+            );
+            error_log('ARM: Update result: ' . var_export($update_result, true));
+            error_log('ARM: wpdb->last_error: ' . $wpdb->last_error);
+        } else {
+            // Create new record for orders that didn't have one
+            $insert_result = $wpdb->insert(
+                $table_name,
+                array(
+                    'order_id' => $order_id,
+                    'customer_email' => $order->get_billing_email(),
+                    'reminder_sent' => 1,
+                    'sent_date' => current_time('mysql'),
+                    'created_at' => current_time('mysql')
+                ),
+                array('%d', '%s', '%d', '%s', '%s')
+            );
+            error_log('ARM: Insert result: ' . var_export($insert_result, true));
+            error_log('ARM: wpdb->last_error: ' . $wpdb->last_error);
+            error_log('ARM: wpdb->insert_id: ' . $wpdb->insert_id);
+        }
+        
+        error_log('ARM: Database updated. Sending success response...');
         
         wp_send_json_success('Reminder sent successfully!');
     }
     
     public function ajax_schedule_reminder() {
+        error_log('ARM: ajax_schedule_reminder called');
+        
         check_ajax_referer('arm_nonce', 'nonce');
         
         if (!current_user_can('manage_options')) {
+            error_log('ARM: Permission denied - user cannot manage_options');
             wp_send_json_error('Unauthorized');
         }
         
         $order_id = intval($_POST['order_id']);
+        error_log('ARM: Attempting to schedule reminder for order #' . $order_id);
         
         $order = wc_get_order($order_id);
         if (!$order) {
+            error_log('ARM: Order #' . $order_id . ' not found');
             wp_send_json_error('Order not found');
         }
         
-        // Schedule the reminder for this old order
-        $this->schedule_review_reminder($order_id);
+        error_log('ARM: Order found. Customer email: ' . $order->get_billing_email());
         
-        wp_send_json_success('Reminder scheduled successfully!');
+        // Get settings for reminder days
+        $settings = get_option('arm_settings', array());
+        $reminder_days = isset($settings['reminder_days']) ? intval($settings['reminder_days']) : 7;
+        error_log('ARM: Reminder days setting: ' . $reminder_days);
+        
+        // Schedule the reminder for this old order
+        error_log('ARM: Calling schedule_review_reminder...');
+        $schedule_result = $this->schedule_review_reminder($order_id);
+        error_log('ARM: schedule_review_reminder returned: ' . var_export($schedule_result, true));
+        
+        global $wpdb;
+        $table_name = $wpdb->prefix . 'arm_reminders';
+        
+        // Check if reminder record was created
+        $reminder = $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM $table_name WHERE order_id = %d",
+            $order_id
+        ));
+        
+        error_log('ARM: Database check - reminder record: ' . ($reminder ? 'FOUND (ID: ' . $reminder->id . ')' : 'NOT FOUND'));
+        
+        if (!$reminder) {
+            error_log('ARM: ERROR - Failed to schedule reminder. No database record created.');
+            wp_send_json_error('Failed to schedule reminder - database record not created. Check debug.log for details.');
+        }
+        
+        // Calculate scheduled send date
+        $scheduled_date = date('F j, Y g:i A', strtotime('+' . $reminder_days . ' days'));
+        
+        error_log('ARM: SUCCESS - Reminder scheduled for ' . $scheduled_date);
+        
+        wp_send_json_success(array(
+            'message' => 'Reminder scheduled successfully!',
+            'scheduled_date' => $scheduled_date,
+            'reminder_days' => $reminder_days
+        ));
     }
     
     public function render_dashboard() {
@@ -1028,31 +1637,31 @@ Make your voice heard - it takes just 30 seconds!',
         include ARM_PLUGIN_DIR . 'templates/product-blacklist.php';
     }
     
+    // TEMPORARY DEBUG - REMOVE BEFORE PRODUCTION
+    public function render_debug_email() {
+        include ARM_PLUGIN_DIR . 'templates/debug-email.php';
+    }
+    
     public function render_google_reviews() {
         include ARM_PLUGIN_DIR . 'templates/google-reviews.php';
     }
     
     public function ajax_save_settings() {
-        // Enable error logging for debugging
-        error_log('ARM: ajax_save_settings called');
-        error_log('ARM POST data: ' . print_r($_POST, true));
-        
         check_ajax_referer('arm_nonce', 'nonce');
         
         if (!current_user_can('manage_options')) {
-            error_log('ARM: Unauthorized user');
             wp_send_json_error('Unauthorized');
         }
         
-        // Get existing settings to preserve any values
-        $existing_settings = get_option('arm_settings', array());
-        error_log('ARM: Existing settings count: ' . count($existing_settings));
-        
-        // Merge with new settings
+        $existing_settings = get_option('arm_settings', array());        // Merge with new settings
         $settings = array_merge($existing_settings, array(
             // Basic settings
             'enable_reminders' => isset($_POST['enable_reminders']) ? true : false,
             'reminder_days' => isset($_POST['reminder_days']) ? intval($_POST['reminder_days']) : 7,
+            'from_email' => isset($_POST['from_email']) ? sanitize_email($_POST['from_email']) : get_option('admin_email'),
+            'from_name' => isset($_POST['from_name']) ? sanitize_text_field($_POST['from_name']) : get_bloginfo('name'),
+            'enable_qr_code' => isset($_POST['enable_qr_code']) ? true : false,
+            'use_custom_review_page' => isset($_POST['use_custom_review_page']) ? true : false,
             'email_subject' => isset($_POST['email_subject']) ? sanitize_text_field($_POST['email_subject']) : '',
             'email_heading' => isset($_POST['email_heading']) ? sanitize_text_field($_POST['email_heading']) : '',
             'email_message' => isset($_POST['email_message']) ? sanitize_textarea_field($_POST['email_message']) : '',
@@ -1121,8 +1730,6 @@ Make your voice heard - it takes just 30 seconds!',
         ));
         
         $result = update_option('arm_settings', $settings);
-        error_log('ARM: Settings saved. Result: ' . ($result ? 'success' : 'failed'));
-        error_log('ARM: New settings count: ' . count($settings));
         
         wp_send_json_success('Settings saved successfully!');
     }
@@ -1162,7 +1769,7 @@ Make your voice heard - it takes just 30 seconds!',
         $site_name = get_bloginfo('name');
         $store_url = home_url();
         $order_number = '12345';
-        $review_url = home_url('/review-submission/?test=1');
+        $review_url = $this->get_review_page_url() . '?test=1';
         
         // Load email template
         ob_start();
@@ -1173,7 +1780,8 @@ Make your voice heard - it takes just 30 seconds!',
         $qr_code_html = '';
         if (isset($settings['enable_qr_code']) && $settings['enable_qr_code']) {
             $qr_size = isset($settings['qr_code_size']) ? intval($settings['qr_code_size']) : 200;
-            $qr_url = 'https://chart.googleapis.com/chart?cht=qr&chs=' . $qr_size . 'x' . $qr_size . '&chl=' . urlencode($review_url);
+            // Use QR Server API (reliable alternative to Google Charts)
+            $qr_url = 'https://api.qrserver.com/v1/create-qr-code/?size=' . $qr_size . 'x' . $qr_size . '&data=' . urlencode($review_url);
             $qr_code_html = '
             <div style="text-align: center; margin: 30px 0;">
                 <p style="font-size: 14px; color: #666; margin-bottom: 10px;">Or scan this QR code:</p>
@@ -1204,10 +1812,17 @@ Make your voice heard - it takes just 30 seconds!',
         // Subject line
         $subject = str_replace('{customer_name}', 'Test User', $settings['email_subject']);
         $subject = str_replace('{store_name}', $site_name, $subject);
-        $subject = '[TEST] ' . $subject;
         
-        // Send email
-        $headers = array('Content-Type: text/html; charset=UTF-8');
+        // Prepare email headers with custom From email/name to avoid spam
+        $from_email = isset($settings['from_email']) ? $settings['from_email'] : get_option('admin_email');
+        $from_name = isset($settings['from_name']) ? $settings['from_name'] : get_bloginfo('name');
+        
+        $headers = array(
+            'Content-Type: text/html; charset=UTF-8',
+            'From: ' . $from_name . ' <' . $from_email . '>',
+            'Reply-To: ' . $from_email
+        );
+        
         $result = wp_mail($test_email, $subject, $email_html, $headers);
         
         if ($result) {
@@ -1215,6 +1830,214 @@ Make your voice heard - it takes just 30 seconds!',
         } else {
             wp_send_json_error('Failed to send test email. Check your mail settings.');
         }
+    }
+    
+    // TEMPORARY DEBUG - REMOVE BEFORE PRODUCTION
+    public function ajax_debug_force_send_email() {
+        check_ajax_referer('arm_nonce', 'nonce');
+        
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized');
+        }
+        
+        $order_id = intval($_POST['order_id']);
+        
+        if (!$order_id) {
+            wp_send_json_error('Invalid order ID');
+        }
+        
+        $order = wc_get_order($order_id);
+        
+        if (!$order) {
+            wp_send_json_error('Order not found. Please check the order ID.');
+        }
+        
+        // Get current settings to show what will be sent
+        $settings = get_option('arm_settings');
+        $customer_email = $order->get_billing_email();
+        $customer_name = $order->get_billing_first_name();
+        
+        // Force send the email
+        $this->send_review_email($order);
+        
+        // Return debug info
+        $debug_info = array(
+            'order_id' => $order_id,
+            'customer_name' => $customer_name,
+            'customer_email' => $customer_email,
+            'email_subject' => $settings['email_subject'] ?? 'NOT SET',
+            'email_heading' => $settings['email_heading'] ?? 'NOT SET',
+            'from_email' => $settings['from_email'] ?? get_option('admin_email'),
+            'from_name' => $settings['from_name'] ?? get_bloginfo('name'),
+            'check_debug_log' => 'Check wp-content/debug.log for detailed send information'
+        );
+        
+        wp_send_json_success(array(
+            'message' => 'Email sent to ' . $customer_email . ' (' . $customer_name . ')',
+            'debug' => $debug_info
+        ));
+    }
+    
+    // TEMPORARY DEBUG - REMOVE BEFORE PRODUCTION
+    // Nuclear option: Wipe all plugin data from database
+    // TEMPORARY DEBUG - REMOVE BEFORE PRODUCTION
+    // Nuclear option: Wipe all plugin data from database
+    public function ajax_nuclear_reset() {
+        try {
+            // Check nonce
+            check_ajax_referer('arm_nonce', 'nonce');
+            
+            if (!current_user_can('manage_options')) {
+                wp_send_json_error('Unauthorized');
+            }
+            
+            global $wpdb;
+            
+            $deleted = array();
+            
+            // Delete all plugin tables
+            $tables = array(
+                $wpdb->prefix . 'arm_reminders',
+                $wpdb->prefix . 'arm_email_tracking',
+                $wpdb->prefix . 'arm_analytics',
+                $wpdb->prefix . 'arm_product_blacklist',
+                $wpdb->prefix . 'arm_review_media'
+            );
+            
+            foreach ($tables as $table) {
+                $result = $wpdb->query("DROP TABLE IF EXISTS $table");
+                $deleted['table_' . basename($table)] = $result !== false ? 'DELETED' : 'FAILED';
+            }
+            
+            // Delete all plugin options
+            $options = array(
+                'arm_settings',
+                'arm_version',
+                'arm_db_version'
+            );
+            
+            foreach ($options as $option) {
+                $result = delete_option($option);
+                $deleted['option_' . $option] = $result ? 'DELETED' : 'NOT FOUND';
+            }
+            
+            // Recreate tables with default structure
+            $this->activate();
+            
+            
+            $default_settings = array(
+                'enable_reminders' => true,
+                'reminder_days' => 7,
+                'fake_review_enabled' => false,
+                'email_subject' => "We'd love your feedback on your recent order!",
+                'email_heading' => 'How was your experience?',
+                'email_message' => "Hi {customer_name},\n\nThank you for your recent purchase from {store_name}! We hope you're enjoying your new items.\n\nWe'd love to hear about your experience. Your feedback helps us improve and helps other customers make informed decisions.\n\nCould you take a moment to share your thoughts?",
+                'button_text' => 'Leave a Review',
+                'button_color' => '#667eea',
+                'from_email' => get_option('admin_email'),
+                'from_name' => get_bloginfo('name'),
+                'days_after_delivery' => 7,
+                'enabled' => true
+            );
+            
+            // FORCE update - don't check if exists
+            update_option('arm_settings', $default_settings, false);
+            $deleted['recreated'] = 'Tables recreated and clean defaults.';
+            
+            wp_send_json_success(array(
+                'message' => 'Plugin database completely wiped and reset with clean defaults.',
+                'deleted' => $deleted
+            ));
+            
+        } catch (Exception $e) {
+            wp_send_json_error('Exception: ' . $e->getMessage());
+        }
+    }
+    
+    // Clear last email error
+    public function ajax_clear_last_error() {
+        check_ajax_referer('arm_nonce', 'nonce');
+        
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized');
+        }
+        
+        delete_option('arm_last_email_error');
+        wp_send_json_success('Error cleared');
+    }
+    
+    // Bulk mark orders as sent (without sending email)
+    public function ajax_bulk_mark_as_sent() {
+        check_ajax_referer('arm_nonce', 'nonce');
+        
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized');
+        }
+        
+        $order_ids = isset($_POST['order_ids']) ? array_map('intval', $_POST['order_ids']) : array();
+        
+        if (empty($order_ids)) {
+            wp_send_json_error('No orders selected');
+        }
+        
+        global $wpdb;
+        $table_name = $wpdb->prefix . 'arm_reminders';
+        
+        $success_count = 0;
+        $failed_count = 0;
+        
+        foreach ($order_ids as $order_id) {
+            $order = wc_get_order($order_id);
+            if (!$order) {
+                $failed_count++;
+                continue;
+            }
+            
+            // Check if reminder record exists
+            $reminder = $wpdb->get_row($wpdb->prepare(
+                "SELECT * FROM $table_name WHERE order_id = %d",
+                $order_id
+            ));
+            
+            if ($reminder) {
+                // Update existing record
+                $result = $wpdb->update(
+                    $table_name,
+                    array(
+                        'reminder_sent' => 1,
+                        'sent_date' => current_time('mysql')
+                    ),
+                    array('order_id' => $order_id),
+                    array('%d', '%s'),
+                    array('%d')
+                );
+            } else {
+                // Create new record
+                $result = $wpdb->insert(
+                    $table_name,
+                    array(
+                        'order_id' => $order_id,
+                        'customer_email' => $order->get_billing_email(),
+                        'reminder_sent' => 1,
+                        'sent_date' => current_time('mysql'),
+                        'created_at' => current_time('mysql')
+                    ),
+                    array('%d', '%s', '%d', '%s', '%s')
+                );
+            }
+            
+            if ($result !== false) {
+                $success_count++;
+            } else {
+                $failed_count++;
+            }
+        }
+        
+        wp_send_json_success(array(
+            'message' => "Marked {$success_count} orders as sent. {$failed_count} failed.",
+            'success_count' => $success_count,
+            'failed_count' => $failed_count
+        ));
     }
     
     public function ajax_generate_fake_review() {
@@ -1302,9 +2125,6 @@ Make your voice heard - it takes just 30 seconds!',
             wp_send_json_error('Unauthorized');
         }
         
-        error_log('ARM: Saving email template');
-        error_log('ARM: POST data: ' . print_r($_POST, true));
-        
         $variant = sanitize_text_field($_POST['variant']);
         $settings = get_option('arm_settings');
         
@@ -1312,47 +2132,55 @@ Make your voice heard - it takes just 30 seconds!',
             $settings = array();
         }
         
-        error_log('ARM: Variant: ' . $variant);
-        
         // Template A uses base field names without suffix, variants B and C use suffixed names
         if ($variant === 'a') {
-            // For variant A, save to both base names and suffixed names
-            $settings['email_subject'] = sanitize_text_field($_POST['email_subject']);
-            $settings['email_subject_a'] = $settings['email_subject'];
+            // For variant A, save to both base names and suffixed names for consistency
+            $email_subject = isset($_POST['email_subject']) ? sanitize_text_field($_POST['email_subject']) : '';
+            $email_heading = isset($_POST['email_heading']) ? sanitize_text_field($_POST['email_heading']) : '';
+            $email_message = isset($_POST['email_message']) ? wp_kses_post(stripslashes($_POST['email_message'])) : '';
+            $button_text = isset($_POST['button_text']) ? sanitize_text_field($_POST['button_text']) : '';
+            $button_color = isset($_POST['button_color']) ? sanitize_hex_color($_POST['button_color']) : '#7c3aed';
+            $show_incentive = isset($_POST['show_incentive_a']);
+            $incentive_message = isset($_POST['incentive_message']) ? sanitize_textarea_field(stripslashes($_POST['incentive_message'])) : '';
             
-            $settings['email_heading'] = sanitize_text_field($_POST['email_heading']);
-            $settings['email_heading_a'] = $settings['email_heading'];
-            
-            $settings['email_message'] = wp_kses_post(stripslashes($_POST['email_message']));
-            $settings['email_message_a'] = $settings['email_message'];
-            
-            $settings['button_text'] = sanitize_text_field($_POST['button_text']);
-            $settings['button_text_a'] = $settings['button_text'];
-            
-            $settings['button_color'] = sanitize_hex_color($_POST['button_color']);
-            $settings['button_color_a'] = $settings['button_color'];
-            
-            $settings['show_incentive_a'] = isset($_POST['show_incentive_a']);
-            $settings['incentive_message_a'] = sanitize_textarea_field(stripslashes($_POST['incentive_message']));
-            
-            error_log('ARM: Saved Template A fields');
+            $settings['email_subject'] = $email_subject;
+            $settings['email_subject_a'] = $email_subject;
+            $settings['email_heading'] = $email_heading;
+            $settings['email_heading_a'] = $email_heading;
+            $settings['email_message'] = $email_message;
+            $settings['email_message_a'] = $email_message;
+            $settings['button_text'] = $button_text;
+            $settings['button_text_a'] = $button_text;
+            $settings['button_color'] = $button_color;
+            $settings['button_color_a'] = $button_color;
+            $settings['show_incentive_a'] = $show_incentive;
+            $settings['incentive_message_a'] = $incentive_message;
         } else {
             // For variants B and C, use suffixed field names
-            $settings['email_subject_' . $variant] = sanitize_text_field($_POST['email_subject_' . $variant]);
-            $settings['email_heading_' . $variant] = sanitize_text_field($_POST['email_heading_' . $variant]);
-            $settings['email_message_' . $variant] = wp_kses_post(stripslashes($_POST['email_message_' . $variant]));
-            $settings['button_text_' . $variant] = sanitize_text_field($_POST['button_text_' . $variant]);
-            $settings['button_color_' . $variant] = sanitize_hex_color($_POST['button_color_' . $variant]);
+            $settings['email_subject_' . $variant] = isset($_POST['email_subject_' . $variant]) ? sanitize_text_field($_POST['email_subject_' . $variant]) : '';
+            $settings['email_heading_' . $variant] = isset($_POST['email_heading_' . $variant]) ? sanitize_text_field($_POST['email_heading_' . $variant]) : '';
+            $settings['email_message_' . $variant] = isset($_POST['email_message_' . $variant]) ? wp_kses_post(stripslashes($_POST['email_message_' . $variant])) : '';
+            $settings['button_text_' . $variant] = isset($_POST['button_text_' . $variant]) ? sanitize_text_field($_POST['button_text_' . $variant]) : '';
+            $settings['button_color_' . $variant] = isset($_POST['button_color_' . $variant]) ? sanitize_hex_color($_POST['button_color_' . $variant]) : '#7c3aed';
             $settings['show_incentive_' . $variant] = isset($_POST['show_incentive_' . $variant]);
-            $settings['incentive_message_' . $variant] = sanitize_textarea_field(stripslashes($_POST['incentive_message_' . $variant]));
-            
-            error_log('ARM: Saved Template ' . strtoupper($variant) . ' fields');
+            $settings['incentive_message_' . $variant] = isset($_POST['incentive_message_' . $variant]) ? sanitize_textarea_field(stripslashes($_POST['incentive_message_' . $variant])) : '';
         }
         
         $result = update_option('arm_settings', $settings);
-        error_log('ARM: Update result: ' . ($result ? 'success' : 'failed'));
         
-        wp_send_json_success('Email template saved successfully!');
+        if ($result || $result === false) {
+            // Force option cache clear
+            wp_cache_delete('arm_settings', 'options');
+            
+            // Return success with reload flag
+            wp_send_json_success(array(
+                'message' => 'Email template saved successfully!',
+                'reload' => true,
+                'redirect_url' => admin_url('admin.php?page=arm-email-template&settings_saved=1&t=' . time())
+            ));
+        } else {
+            wp_send_json_error('Failed to save template.');
+        }
     }
     
     // Reset email template to default
@@ -1599,14 +2427,39 @@ Thank you for your time!
             'comment_parent' => 0,
             'user_id' => 0,
             'comment_approved' => 1,
-            'comment_date' => $review_date
+            'comment_date' => $review_date,
+            'comment_date_gmt' => get_gmt_from_date($review_date)
         );
         
         $comment_id = wp_insert_comment($comment_data);
         
         if ($comment_id) {
-            update_comment_meta($comment_id, 'rating', $rating);
+            update_comment_meta($comment_id, 'rating', intval($rating));
             update_comment_meta($comment_id, 'verified', $verified ? 1 : 0);
+            
+            // Trigger WooCommerce hooks
+            do_action('comment_post', $comment_id, 1);
+            do_action('woocommerce_product_review_comment_approved', $comment_id);
+            WC_Comments::clear_transients($product_id);
+            
+            // Calculate average rating manually
+            global $wpdb;
+            $rating_data = $wpdb->get_row($wpdb->prepare("
+                SELECT COUNT(*) as count, AVG(meta_value) as average
+                FROM {$wpdb->commentmeta}
+                INNER JOIN {$wpdb->comments} ON {$wpdb->commentmeta}.comment_id = {$wpdb->comments}.comment_ID
+                WHERE meta_key = 'rating'
+                AND comment_post_ID = %d
+                AND comment_approved = '1'
+                AND meta_value > 0
+            ", $product_id));
+            
+            $avg_rating = $rating_data && $rating_data->average ? round($rating_data->average, 2) : 0;
+            $review_count = $rating_data && $rating_data->count ? intval($rating_data->count) : 0;
+            
+            update_post_meta($product_id, '_wc_average_rating', $avg_rating);
+            update_post_meta($product_id, '_wc_review_count', $review_count);
+            update_post_meta($product_id, '_wc_rating_count', $review_count);
             
             // Add photos if enabled
             if ($add_photos && rand(1, 100) <= 30) {
@@ -2017,6 +2870,86 @@ Thank you for your time!
         <?php
     }
     
+    // Prevent duplicate reviews - hide review form if user already reviewed
+    public function prevent_duplicate_reviews($args) {
+        global $product;
+        
+        if (!$product) {
+            return $args;
+        }
+        
+        // Get current user email
+        $current_user = wp_get_current_user();
+        $user_email = $current_user->user_email;
+        
+        // If not logged in, check if there's an email in the form submission
+        if (!$user_email && isset($_POST['email'])) {
+            $user_email = sanitize_email($_POST['email']);
+        }
+        
+        // If we have an email, check for existing reviews
+        if ($user_email) {
+            $product_id = $product->get_id();
+            
+            // Check for existing reviews (exclude trashed/spam)
+            $existing_reviews = get_comments(array(
+                'post_id' => $product_id,
+                'author_email' => $user_email,
+                'type' => 'review',
+                'status' => array('approve', 'hold', '0', '1'), // Exclude trash/spam
+                'count' => true
+            ));
+            
+            if ($existing_reviews > 0) {
+                // User already reviewed - disable the form
+                $args['comment_field'] = '<p class="arm-already-reviewed" style="padding: 20px; background: #f0f0f0; border-left: 4px solid #0073aa; margin: 20px 0;"><strong>Thank you!</strong> You have already submitted a review for this product.</p>';
+                $args['title_reply'] = '';
+                $args['label_submit'] = '';
+                $args['must_log_in'] = '';
+                $args['logged_in_as'] = '';
+                
+                // Remove submit button
+                add_filter('comment_form_submit_button', '__return_empty_string', 99);
+            }
+        }
+        
+        return $args;
+    }
+    
+    // Display review media using action hook (cannot be filtered out)
+    public function display_review_media_action($comment) {
+        global $wpdb;
+        $media_table = $wpdb->prefix . 'arm_review_media';
+        
+        // Check if table exists
+        if ($wpdb->get_var("SHOW TABLES LIKE '{$media_table}'") !== $media_table) {
+            return;
+        }
+        
+        // Get media for this review
+        $media_files = $wpdb->get_results($wpdb->prepare(
+            "SELECT file_url FROM {$media_table} WHERE comment_id = %d ORDER BY created_at ASC",
+            $comment->comment_ID
+        ));
+        
+        if (empty($media_files)) {
+            return;
+        }
+        
+        // Output media HTML directly with links to full-size images
+        echo '<div class="arm-review-media" style="margin-top: 15px; margin-bottom: 15px;">';
+        
+        foreach ($media_files as $media) {
+            echo '<div style="display: inline-block; margin-right: 10px; margin-bottom: 10px;">';
+            echo '<a href="' . esc_url($media->file_url) . '" target="_blank" rel="noopener">';
+            echo '<img src="' . esc_url($media->file_url) . '" alt="Review photo" style="max-width: 150px; height: auto; border: 2px solid #ddd; border-radius: 4px; cursor: pointer;" />';
+            echo '</a>';
+            echo '</div>';
+        }
+        
+        echo '</div>';
+    }
+    
     // Add media upload to review form
     public function add_media_upload_to_review_form($args) {
         $settings = get_option('arm_settings');
@@ -2171,6 +3104,7 @@ Thank you for your time!
     
     // Send incentive email
     private function send_incentive_email($email, $coupon_code, $amount, $type) {
+        $settings = get_option('arm_settings');
         $subject = 'Thank you for your review! Here\'s your reward';
         $discount_text = $type === 'percent' ? $amount . '%' : '$' . $amount;
         
@@ -2181,7 +3115,17 @@ Thank you for your time!
         $message .= "Use it on your next order!\n\n";
         $message .= "Best regards,\n" . get_bloginfo('name');
         
-        wp_mail($email, $subject, $message);
+        // Prepare email headers with custom From email/name
+        $from_email = isset($settings['from_email']) ? $settings['from_email'] : get_option('admin_email');
+        $from_name = isset($settings['from_name']) ? $settings['from_name'] : get_bloginfo('name');
+        
+        $headers = array(
+            'Content-Type: text/plain; charset=UTF-8',
+            'From: ' . $from_name . ' <' . $from_email . '>',
+            'Reply-To: ' . $from_email
+        );
+        
+        wp_mail($email, $subject, $message, $headers);
     }
     
     // Handle review moderation
@@ -2283,7 +3227,17 @@ Thank you for your time!
             $message .= "Review:\n{$comment->comment_content}\n\n";
             $message .= "Please reach out to this customer to address their concerns.";
             
-            wp_mail($support_email, $subject, $message);
+            // Prepare email headers with custom From email/name
+            $from_email = isset($settings['from_email']) ? $settings['from_email'] : get_option('admin_email');
+            $from_name = isset($settings['from_name']) ? $settings['from_name'] : get_bloginfo('name');
+            
+            $headers = array(
+                'Content-Type: text/plain; charset=UTF-8',
+                'From: ' . $from_name . ' <' . $from_email . '>',
+                'Reply-To: ' . $from_email
+            );
+            
+            wp_mail($support_email, $subject, $message, $headers);
         }
     }
     
@@ -2455,6 +3409,7 @@ Thank you for your time!
         }
         
         $order_ids = isset($_POST['order_ids']) ? array_map('intval', $_POST['order_ids']) : array();
+        $is_old_orders = isset($_POST['is_old_orders']) && $_POST['is_old_orders'];
         
         if (empty($order_ids)) {
             wp_send_json_error('No orders selected');
@@ -2467,13 +3422,57 @@ Thank you for your time!
             wp_send_json_error("Bulk send limit is {$limit} orders at a time");
         }
         
+        global $wpdb;
+        $table_name = $wpdb->prefix . 'arm_reminders';
+        
         $success_count = 0;
         $failed_count = 0;
         
         foreach ($order_ids as $order_id) {
             $order = wc_get_order($order_id);
             if ($order) {
-                $this->send_review_email($order);
+                // Send the email
+                $result = $this->send_review_email($order);
+                
+                if (!$result) {
+                    $failed_count++;
+                    error_log('ARM: Failed to send email for order #' . $order_id);
+                    continue;
+                }
+                
+                // Check if reminder record exists
+                $reminder = $wpdb->get_row($wpdb->prepare(
+                    "SELECT * FROM $table_name WHERE order_id = %d",
+                    $order_id
+                ));
+                
+                if ($reminder) {
+                    // Update existing record
+                    $wpdb->update(
+                        $table_name,
+                        array(
+                            'reminder_sent' => 1,
+                            'sent_date' => current_time('mysql')
+                        ),
+                        array('order_id' => $order_id),
+                        array('%d', '%s'),
+                        array('%d')
+                    );
+                } else {
+                    // Create new record for old orders
+                    $wpdb->insert(
+                        $table_name,
+                        array(
+                            'order_id' => $order_id,
+                            'customer_email' => $order->get_billing_email(),
+                            'reminder_sent' => 1,
+                            'sent_date' => current_time('mysql'),
+                            'created_at' => current_time('mysql')
+                        ),
+                        array('%d', '%s', '%d', '%s', '%s')
+                    );
+                }
+                
                 $success_count++;
             } else {
                 $failed_count++;
@@ -2658,16 +3657,40 @@ Thank you for your time!
             'comment_parent' => 0,
             'user_id' => 0,
             'comment_approved' => 1,
-            'comment_date' => $google_review->review_date
+            'comment_date' => $google_review->review_date,
+            'comment_date_gmt' => get_gmt_from_date($google_review->review_date)
         );
         
         $comment_id = wp_insert_comment($comment_data);
         
         if ($comment_id) {
             // Add rating meta
-            add_comment_meta($comment_id, 'rating', $google_review->rating);
+            add_comment_meta($comment_id, 'rating', intval($google_review->rating));
             add_comment_meta($comment_id, 'verified', 0);
             add_comment_meta($comment_id, 'google_import', 1);
+            
+            // Trigger WooCommerce hooks
+            do_action('comment_post', $comment_id, 1);
+            do_action('woocommerce_product_review_comment_approved', $comment_id);
+            WC_Comments::clear_transients($product_id);
+            
+            // Calculate average rating manually
+            $rating_data = $wpdb->get_row($wpdb->prepare("
+                SELECT COUNT(*) as count, AVG(meta_value) as average
+                FROM {$wpdb->commentmeta}
+                INNER JOIN {$wpdb->comments} ON {$wpdb->commentmeta}.comment_id = {$wpdb->comments}.comment_ID
+                WHERE meta_key = 'rating'
+                AND comment_post_ID = %d
+                AND comment_approved = '1'
+                AND meta_value > 0
+            ", $product_id));
+            
+            $avg_rating = $rating_data && $rating_data->average ? round($rating_data->average, 2) : 0;
+            $review_count = $rating_data && $rating_data->count ? intval($rating_data->count) : 0;
+            
+            update_post_meta($product_id, '_wc_average_rating', $avg_rating);
+            update_post_meta($product_id, '_wc_review_count', $review_count);
+            update_post_meta($product_id, '_wc_rating_count', $review_count);
             
             // Mark as synced
             $wpdb->update(
